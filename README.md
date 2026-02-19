@@ -50,7 +50,7 @@ AI agents forget everything between sessions. Context windows are finite. Conver
 
 ```
 workspace/
-├── MEMORY.md                    # 🧠 Long-term memory (≤80 lines, curated)
+├── MEMORY.md                    # 🧠 Long-term memory (≤200 lines, curated)
 ├── memory/
 │   ├── 2026-02-20.md           # 📝 Today's journal (raw, real-time)
 │   ├── 2026-02-19.md           # 📝 Yesterday
@@ -69,7 +69,7 @@ workspace/
 |------|------|-----------|---------|
 | **Hot** | `memory/YYYY-MM-DD.md` | 7 days | Raw daily notes, everything that happened |
 | **Warm** | `memory/weekly/*.md` | Indefinite | Compressed weekly summaries with source annotations |
-| **Cold** | `MEMORY.md` | Permanent | Curated long-term memory, ≤80 lines, 4-criterion gate |
+| **Cold** | `MEMORY.md` | Permanent | Curated long-term memory, ≤200 lines, 4-criterion gate |
 
 ## 🔑 Key Design Decisions
 
@@ -104,7 +104,7 @@ Priority order for memory capture:
 
 ### 4. 80-Line Hard Limit
 
-MEMORY.md has a hard cap of 80 lines. This forces curation — when you hit the limit, you must compress or remove outdated entries before adding new ones. This prevents unbounded growth and keeps recall fast.
+MEMORY.md has a hard cap of 200 lines. This forces curation — when you hit the limit, you must compress or remove outdated entries before adding new ones. This prevents unbounded growth and keeps recall fast.
 
 ## 🚀 Quick Start
 
@@ -172,7 +172,7 @@ Running since 2026-02-12:
 - **93% search accuracy** with qmd (BM25 + vector + reranking)
 - **~2s recall** with qmd daemon, ~60s without (CPU-only)
 - **8 daily journals** compressed into weekly summaries
-- **78/80 lines** in MEMORY.md (well within limit)
+- **78/200 lines** in MEMORY.md (well within limit)
 
 ## 🤝 Works With
 

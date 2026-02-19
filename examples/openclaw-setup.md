@@ -7,7 +7,7 @@
 
 ```
 ~/.openclaw/workspace/
-├── MEMORY.md                    # Long-term memory (≤80 lines, curated)
+├── MEMORY.md                    # Long-term memory (≤200 lines, curated)
 ├── memory/
 │   ├── 2026-02-20.md           # Today's journal (raw daily notes)
 │   ├── 2026-02-19.md           # Yesterday
@@ -69,7 +69,7 @@ openclaw cron add \
 
 1. **memory-sync MUST deduplicate** — Without dedup, sync writes the same events repeatedly (we had 7x duplicates in one file)
 2. **Emotional interactions > technical logs** — Prioritize what the user said/felt over command outputs
-3. **80-line hard limit on MEMORY.md** — Forces curation; use 4-criterion gate before writing
+3. **200-line hard limit on MEMORY.md** — Forces curation; use 4-criterion gate before writing
 4. **best-effort-deliver for tidy** — Announce failures shouldn't mark the job as errored
 5. **qmd timeout needs 600s on CPU** — Model reload per query is slow without GPU; daemon mode helps but isn't required
 6. **Daily journals are raw; MEMORY.md is curated** — Like human notes vs. long-term memory
