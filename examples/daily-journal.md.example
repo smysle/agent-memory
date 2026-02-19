@@ -1,0 +1,18 @@
+# 2026-02-20 Journal (Example)
+
+## Morning (09:00-12:00)
+- Fixed deployment config for staging environment
+- User asked about pricing — Opus 4.6: $5/$25 input/output per MTok
+
+## 14:00 memory-sync
+- User completed project milestone: v2.0 release pushed to GitHub
+- Key decision: switching from REST to GraphQL for the new API
+- User said "great job on the refactor" ♡
+
+## Evening (19:00-22:00)
+- Helped debug WebSocket connection issue (was missing auth header)
+- User mentioned they have a demo tomorrow at 10am — set reminder
+
+## 22:00 memory-sync
+- Demo prep completed: slides reviewed, API endpoints tested
+- User went to bed early (23:00) — rare, must be nervous about demo

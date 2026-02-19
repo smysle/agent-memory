@@ -4,7 +4,6 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-≥18-green.svg)](https://nodejs.org/)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)]()
 
 ---
 
@@ -16,232 +15,173 @@ AI agents forget everything between sessions. Context windows are finite. Conver
 
 ## 🌙 How It Works — The Sleep Cycle
 
-Just like humans consolidate memories during sleep, AgentMemory manages information across four phases:
+| Phase | Human Analogy | Agent Behavior | Schedule |
+|-------|--------------|----------------|----------|
+| **Awake** | Experience | Write important events to daily journal immediately | Real-time |
+| **Light Sleep** | Memory replay | `memory-sync`: scan sessions, extract highlights, **deduplicate**, fill gaps | 2x/day (14:00 & 22:00) |
+| **Deep Sleep** | Memory consolidation | `memory-tidy`: compress old journals → weekly, distill → MEMORY.md, archive | 1x/day (03:00) |
+| **Recall** | Memory retrieval | Semantic search via `memory_search` → `memory_get` | On demand |
 
-| Phase | Human Analogy | What It Does |
-|-------|--------------|-------------|
-| 🌅 **Awake** | Jotting notes | Instant journaling — write events as they happen |
-| 🌙 **Light Sleep** | Reviewing the day | Periodic sync — scan recent logs, extract highlights |
-| 🌑 **Deep Sleep** | Memory consolidation | Compress old dailies → weekly summaries, distill → long-term memory |
-| 🔍 **Recall** | Remembering | Semantic search across all memory layers |
+```
+         ┌─────────────┐
+         │   Awake     │  Real-time journaling
+         │  (Journal)  │  memory/YYYY-MM-DD.md
+         └──────┬──────┘
+                │
+         ┌──────▼──────┐
+         │ Light Sleep │  14:00 & 22:00
+         │(memory-sync)│  Deduplicate + extract highlights
+         └──────┬──────┘
+                │
+         ┌──────▼──────┐
+         │ Deep Sleep  │  03:00
+         │(memory-tidy)│  Compress → weekly, distill → MEMORY.md
+         └──────┬──────┘
+                │
+         ┌──────▼──────┐
+         │   Recall    │  On demand
+         │  (Search)   │  Semantic search across all memory
+         └─────────────┘
+```
 
-## ✨ Features
+## 📁 Memory Architecture
 
-- **📝 Instant Journaling** — `journal()`, `decision()`, `lesson()`, `preference()`
-- **🌙 Light Sleep Sync** — Extract highlights from recent notes based on distill criteria
-- **🌑 Deep Sleep Tidy** — Archive old dailies, create weekly summaries, distill to long-term memory
-- **🔍 Multi-Layer Recall** — Search across daily notes, weekly summaries, and long-term memory
-- **🗑️ Selective Forgetting** — Remove outdated memories by pattern
-- **📊 Memory Stats** — Track usage, capacity, date ranges
-- **⏰ Auto-Scheduling** — Start daemon-mode sleep cycles
-- **📁 Markdown-Based** — All storage is plain Markdown files, human-readable
-- **🚀 Zero Dependencies** — Pure Node.js, nothing to install
-- **💻 CLI + Library** — Use from terminal or import in your agent code
+```
+workspace/
+├── MEMORY.md                    # 🧠 Long-term memory (≤80 lines, curated)
+├── memory/
+│   ├── 2026-02-20.md           # 📝 Today's journal (raw, real-time)
+│   ├── 2026-02-19.md           # 📝 Yesterday
+│   ├── ...                     # Recent 7 days
+│   ├── weekly/
+│   │   └── 2026-02-09.md      # 📦 Compressed weekly summaries
+│   ├── archive/
+│   │   ├── 2026-02-12.md      # 🗄️ Archived dailies
+│   │   └── MEMORY.md.bak-*    # 💾 MEMORY.md backups
+│   └── heartbeat-state.json    # 💓 Heartbeat timestamps
+```
 
----
+### Three-Tier Memory
+
+| Tier | File | Retention | Content |
+|------|------|-----------|---------|
+| **Hot** | `memory/YYYY-MM-DD.md` | 7 days | Raw daily notes, everything that happened |
+| **Warm** | `memory/weekly/*.md` | Indefinite | Compressed weekly summaries with source annotations |
+| **Cold** | `MEMORY.md` | Permanent | Curated long-term memory, ≤80 lines, 4-criterion gate |
+
+## 🔑 Key Design Decisions
+
+### 1. Deduplication is Everything
+
+The #1 lesson from production: **memory-sync MUST check existing content before writing**. Without dedup, the same events get written 7-8 times (once per sync run). Our sync prompt now requires:
+
+1. Read the existing journal first
+2. Compare line-by-line with new conversation data
+3. Only append truly new events
+4. Never rewrite existing sections
+
+### 2. The 4-Criterion Gate (MEMORY.md)
+
+Before anything enters long-term memory, ALL four must be true:
+
+- **(a)** Not having this would cause a specific mistake
+- **(b)** Applies to multiple future conversations
+- **(c)** Self-contained and understandable without context
+- **(d)** Not redundant with existing MEMORY.md content
+
+**Reverse check**: "What specific mistake would I make without this?" — if you can't answer, don't write it.
+
+### 3. Emotional > Technical
+
+Priority order for memory capture:
+1. 💬 What the user said / emotional interactions (HIGHEST)
+2. 🎯 Key decisions and conclusions
+3. ✅ Completed milestones
+4. 📚 Lessons learned / pitfalls
+5. 🔧 Technical operations (LOWEST — one-liner is fine)
+
+### 4. 80-Line Hard Limit
+
+MEMORY.md has a hard cap of 80 lines. This forces curation — when you hit the limit, you must compress or remove outdated entries before adding new ones. This prevents unbounded growth and keeps recall fast.
 
 ## 🚀 Quick Start
 
-### CLI
+### Option A: Use with OpenClaw (Recommended)
+
+See [`examples/openclaw-setup.md`](examples/openclaw-setup.md) for the complete setup guide including:
+- Cron job configuration
+- qmd semantic search integration
+- Proven prompt templates
+
+### Option B: Use the CLI
 
 ```bash
-# Install globally
+# Install
 npm install -g agent-memory
 
-# Run the demo
-agent-memory demo
+# Initialize memory structure
+agent-memory init
 
-# Journal something
-agent-memory journal "User prefers dark themes"
-agent-memory decision "Switched from Starship to Oh My Posh"
-agent-memory lesson "Cache miss with key rotation costs 12x more"
+# Write to today's journal
+agent-memory journal "Deployed v2.0 to production"
 
-# Search your memory
-agent-memory recall "dark theme"
+# Semantic search across all memory
+agent-memory recall "deployment issues"
 
 # Run memory consolidation
-agent-memory sync    # Light sleep
-agent-memory tidy    # Deep sleep
-
-# Check stats
-agent-memory stats
+agent-memory sync   # Light sleep — deduplicate & extract
+agent-memory tidy   # Deep sleep — compress & distill
 ```
 
-### Library
+### Option C: Use as a Library
 
 ```javascript
-const { AgentMemory } = require('agent-memory');
+import { AgentMemory } from 'agent-memory';
 
-const mem = new AgentMemory({ baseDir: '.my-agent-memory' });
+const memory = new AgentMemory({ workDir: './workspace' });
 
-// Awake — write as things happen
-mem.journal('Set up project with Claude Opus 4.6');
-mem.decision('Use Brave Search instead of Perplexity');
-mem.lesson('Always use background mode for long exec commands');
-mem.preference('User likes dark themes, hates blue-purple gradients');
+// Journal (awake phase)
+await memory.journal('User prefers dark mode');
 
-// Light Sleep — extract highlights
-const { highlights } = mem.sync();
+// Recall (search phase)
+const results = await memory.recall('user preferences');
 
-// Deep Sleep — compress and distill
-const { archived, distilled } = mem.tidy();
+// Sync (light sleep)
+await memory.sync();
 
-// Recall — search all layers
-const results = mem.recall('dark theme preference');
-// → [{ source: 'daily', score: 0.8, snippet: 'User likes dark themes...' }]
-
-// Selective forgetting
-mem.forget('outdated-project');
-
-// Auto-scheduling (daemon mode)
-mem.startCycles();  // Runs sync every 4h, tidy every 24h
+// Tidy (deep sleep)
+await memory.tidy();
 ```
 
----
+## 📋 Example Files
 
-## 📋 CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `agent-memory journal <text>` | Write entry to today's daily note |
-| `agent-memory decision <text>` | Record a key decision |
-| `agent-memory lesson <text>` | Record a lesson learned |
-| `agent-memory sync` | Light sleep — extract highlights from recent notes |
-| `agent-memory tidy` | Deep sleep — archive old dailies, distill to long-term memory |
-| `agent-memory recall <query>` | Search across all memory layers |
-| `agent-memory forget <pattern>` | Remove matching entries from long-term memory |
-| `agent-memory stats` | Show memory statistics |
-| `agent-memory demo` | Run full demo with sample data |
-
-### Options
-
-| Flag | Description |
+| File | Description |
 |------|-------------|
-| `--dir <path>` | Memory directory (default: `.agent-memory`) |
-| `--json` | Output as JSON |
-| `--help` | Show help |
-| `--version` | Show version |
+| [`examples/openclaw-setup.md`](examples/openclaw-setup.md) | Full OpenClaw integration guide |
+| [`examples/memory-sync-prompt.txt`](examples/memory-sync-prompt.txt) | Production memory-sync cron prompt |
+| [`examples/memory-tidy-prompt.txt`](examples/memory-tidy-prompt.txt) | Production memory-tidy cron prompt |
+| [`examples/MEMORY.md.example`](examples/MEMORY.md.example) | Example long-term memory file |
+| [`examples/daily-journal.md.example`](examples/daily-journal.md.example) | Example daily journal |
 
----
+## 🧪 Production Stats
 
-## 🏗️ Memory Architecture
+Running since 2026-02-12:
+- **119 documents** indexed (daily logs + sessions + MEMORY.md)
+- **93% search accuracy** with qmd (BM25 + vector + reranking)
+- **~2s recall** with qmd daemon, ~60s without (CPU-only)
+- **8 daily journals** compressed into weekly summaries
+- **78/80 lines** in MEMORY.md (well within limit)
 
-```
-.agent-memory/
-├── MEMORY.md          ← Long-term memory (distilled, 80-line cap)
-├── daily/
-│   ├── 2026-02-19.md  ← Today's raw notes
-│   └── 2026-02-18.md  ← Yesterday's notes
-├── weekly/
-│   └── week-2026-02-10.md  ← Compressed weekly summary
-└── archive/
-    └── 2026-02-10.md  ← Old dailies (preserved)
-```
+## 🤝 Works With
 
-### Memory Layers
-
-| Layer | Retention | Purpose |
-|-------|-----------|---------|
-| **Daily** | 7 days (configurable) | Raw event log, full detail |
-| **Weekly** | Indefinite | Compressed summaries of daily notes |
-| **Long-term** | Indefinite (80-line cap) | Distilled decisions, lessons, preferences |
-| **Archive** | Indefinite | Old dailies preserved for reference |
-
-### Distill Criteria
-
-Entries are promoted to long-term memory if they match:
-- Category: `decision`, `lesson`, `preference`
-- Keywords: `decision`, `lesson`, `preference`, `important`
-
-Customize via config:
-```javascript
-new AgentMemory({
-  distillCriteria: ['decision', 'lesson', 'preference', 'important', 'critical'],
-  longTermMaxLines: 100,
-  maxDailyAgeDays: 14,
-});
-```
-
----
-
-## 🔌 Integration Examples
-
-### With OpenClaw
-
-```javascript
-// In your agent's heartbeat handler
-const { AgentMemory } = require('agent-memory');
-const mem = new AgentMemory({ baseDir: '/home/user/.openclaw/workspace/memory' });
-
-// During conversations
-mem.journal(`User asked about ${topic}`);
-mem.decision(`Chose ${model} for this task`);
-
-// In heartbeat cron
-const { highlights } = mem.sync();
-if (highlights.length > 0) {
-  // Report new highlights to user
-}
-```
-
-### With LangChain
-
-```javascript
-const { AgentMemory } = require('agent-memory');
-const mem = new AgentMemory();
-
-// Before each LLM call, inject relevant memories
-const context = mem.recall(userQuery);
-const memoryContext = context.map(r => r.snippet).join('\n');
-```
-
-### With Cline CLI
-
-```javascript
-// Add persistent memory to Cline agents
-const { AgentMemory } = require('agent-memory');
-const mem = new AgentMemory({ baseDir: '.cline-memory' });
-
-// After each task
-mem.journal(`Completed: ${taskDescription}`);
-mem.lesson(`${whatWorked} — remember for next time`);
-
-// Before starting new task
-const relevant = mem.recall(taskDescription);
-```
-
----
-
-## 🆚 Comparison
-
-| Feature | AgentMemory | Mem0 | ALMA | memsearch |
-|---------|:-----------:|:----:|:----:|:---------:|
-| Zero dependencies | ✅ | ❌ | ❌ | ❌ |
-| Sleep-cycle model | ✅ | ❌ | ❌ | ❌ |
-| Automatic consolidation | ✅ | ❌ | ❌ | ❌ |
-| Selective forgetting | ✅ | ✅ | ✅ | ❌ |
-| Markdown storage | ✅ | ❌ | ❌ | ✅ |
-| CLI tool | ✅ | ❌ | ❌ | ❌ |
-| No API key needed | ✅ | ❌ | ❌ | ✅ |
-| Human-readable files | ✅ | ❌ | ❌ | ✅ |
-
----
-
-## 🤝 Contributing
-
-1. **New memory strategies** — Improve consolidation algorithms
-2. **Better recall** — Add embedding-based semantic search
-3. **New integrations** — Plugins for popular agent frameworks
-4. **Storage backends** — SQLite, Redis, S3
-
-```bash
-git clone https://github.com/smysle/agent-memory.git
-cd agent-memory
-node bin/agent-memory.js demo
-```
-
----
+- **[OpenClaw](https://github.com/openclaw/openclaw)** — Full integration via cron jobs + qmd backend
+- **Any LLM agent** — The prompts and architecture are model-agnostic
+- **Any cron system** — Just schedule the sync/tidy prompts however you like
 
 ## 📄 License
 
-[MIT](LICENSE) © 2026
+MIT — use it, fork it, make your agents remember.
+
+---
+
+*Built with 🧠 by agents who got tired of forgetting.*

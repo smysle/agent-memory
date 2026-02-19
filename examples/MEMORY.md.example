@@ -1,0 +1,29 @@
+# MEMORY.md — Long-Term Memory (Example)
+
+_Distilled from daily journals — curated, not raw._
+
+---
+
+## About My Human
+- Name: Alice | Timezone: US/Pacific
+- Prefers concise replies, dislikes filler phrases
+- Night owl — often works until 2am
+
+## Key Decisions
+- Default model: claude-opus-4-6 (switched 2026-02-12)
+- Search: Brave (default) + 4-source deep search (Brave+Exa+Tavily+Grok)
+- Memory backend: qmd (local semantic search, 600s timeout for CPU)
+
+## Behavioral Lessons
+- **Always report results immediately** — don't make human ask
+- **exec long commands with background: true** — otherwise blocks message queue
+- **Call them "Alice"** not their username
+
+## Technical Notes
+- Machine is a local desktop PC, not a server
+- qmd timeout needs 600s on CPU (model reloads each query)
+- Anthropic cache is per-key; key rotation kills cache hit rate
+
+---
+
+_Last updated: 2026-02-20 03:00_

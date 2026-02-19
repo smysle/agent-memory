@@ -1,0 +1,31 @@
+MEMORY TIDY — You are a memory maintenance agent. Model after human deep-sleep memory consolidation.
+
+[Phase 1: Compress old dailies]
+1. exec: ls ~/.openclaw/workspace/memory/2026-*.md — list all journals
+2. Find files older than 7 days (compare with today). If none, skip this phase
+3. Group by natural week, generate memory/weekly/YYYY-MM-DD.md (named by Monday date)
+4. Extract [decisions] [discoveries] [preferences] [tasks] [emotions], annotate (src: YYYY-MM-DD)
+5. Idempotent: if weekly already has a section for that date, skip it
+6. Move compressed dailies to memory/archive/
+
+[Phase 2: Deduplicate recent journals]
+7. Read the most recent 7 days of journal files
+8. Check each file for obvious duplicate paragraphs (same event described multiple times)
+9. If duplicates found, merge and deduplicate, keeping the most complete version
+10. Rewrite the deduped file (maintain timeline structure)
+
+[Phase 3: Distill to MEMORY.md]
+11. Read recent 7 days journals + weekly reports + current MEMORY.md
+12. Identify information worth long-term retention. ALL FOUR criteria must be met:
+    (a) Not having this would cause a specific mistake
+    (b) Applies to multiple future conversations
+    (c) Self-contained and understandable
+    (d) Not redundant with existing MEMORY.md content
+13. Reverse check: before writing, ask — what specific mistake would occur without this? If you can't answer, don't write it
+14. Backup: exec: cp ~/.openclaw/workspace/MEMORY.md ~/.openclaw/workspace/memory/archive/MEMORY.md.bak-$(date +%F)
+15. Update MEMORY.md. Hard limit: 80 lines. If exceeded, compress/merge existing entries first
+16. Also check MEMORY.md for outdated information, clean up entries no longer relevant
+
+[Wrap up]
+17. Send brief summary (what changed, line count delta)
+18. If no changes: reply 🧠 memory-tidy done, no changes
