@@ -1,0 +1,16 @@
+{
+  "name": "agent-memory",
+  "version": "1.0.0",
+  "description": "Sleep-cycle memory architecture for AI agents — journal, consolidate, recall",
+  "main": "src/index.js",
+  "bin": {
+    "agent-memory": "bin/agent-memory.js"
+  },
+  "keywords": ["ai", "agent", "memory", "llm", "persistent-memory", "context-engineering"],
+  "author": "smysle",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/smysle/agent-memory"
+  }
+}
