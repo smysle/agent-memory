@@ -1,9 +1,10 @@
-# 🧠 AgentMemory
+# 🧠 AgentMemory v2
 
-> **Sleep-cycle memory architecture for AI agents** — journal, consolidate, recall.
+> **Sleep-cycle memory architecture for AI agents** — remember, recall, forget, evolve.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-≥18-green.svg)](https://nodejs.org/)
+[![MCP](https://img.shields.io/badge/protocol-MCP-orange.svg)](https://modelcontextprotocol.io/)
 
 **English** | **[简体中文](README.zh-CN.md)**
 
@@ -13,177 +14,167 @@
 
 AI agents forget everything between sessions. Context windows are finite. Conversation history gets truncated. Important decisions, lessons, and preferences vanish.
 
-**AgentMemory** solves this by giving AI agents a persistent memory system inspired by how human brains consolidate memories during sleep.
+## 🌙 The Solution: Sleep-Cycle Memory
 
-## 🌙 How It Works — The Sleep Cycle
-
-| Phase | Human Analogy | Agent Behavior | Schedule |
-|-------|--------------|----------------|----------|
-| **Awake** | Experience | Write important events to daily journal immediately | Real-time |
-| **Light Sleep** | Memory replay | `memory-sync`: scan sessions, extract highlights, **deduplicate**, fill gaps | 2x/day (14:00 & 22:00) |
-| **Deep Sleep** | Memory consolidation | `memory-tidy`: compress old journals → weekly, distill → MEMORY.md, archive | 1x/day (03:00) |
-| **Recall** | Memory retrieval | Semantic search via `memory_search` → `memory_get` | On demand |
+Inspired by how human brains consolidate memories during sleep, AgentMemory manages information across four phases:
 
 ```
-         ┌─────────────┐
-         │   Awake     │  Real-time journaling
-         │  (Journal)  │  memory/YYYY-MM-DD.md
-         └──────┬──────┘
-                │
-         ┌──────▼──────┐
-         │ Light Sleep │  14:00 & 22:00
-         │(memory-sync)│  Deduplicate + extract highlights
-         └──────┬──────┘
-                │
-         ┌──────▼──────┐
-         │ Deep Sleep  │  03:00
-         │(memory-tidy)│  Compress → weekly, distill → MEMORY.md
-         └──────┬──────┘
-                │
-         ┌──────▼──────┐
-         │   Recall    │  On demand
-         │  (Search)   │  Semantic search across all memory
-         └─────────────┘
+  Awake          Light Sleep       Deep Sleep        Recall
+  (Journal)      (Sync)            (Tidy)           (Search)
+  ────────── ──→ ────────── ──→ ────────── ──→ ──────────
+  Real-time      Deduplicate      Compress          Intent-aware
+  capture        + extract        + distill         BM25 search
+                                  + decay           + priority
 ```
 
-## 📁 Memory Architecture
+## ✨ Key Features
 
-```
-workspace/
-├── MEMORY.md                    # 🧠 Long-term memory (≤200 lines, curated)
-├── memory/
-│   ├── 2026-02-20.md           # 📝 Today's journal (raw, real-time)
-│   ├── 2026-02-19.md           # 📝 Yesterday
-│   ├── ...                     # Recent 7 days
-│   ├── weekly/
-│   │   └── 2026-02-09.md      # 📦 Compressed weekly summaries
-│   ├── archive/
-│   │   ├── 2026-02-12.md      # 🗄️ Archived dailies
-│   │   └── MEMORY.md.bak-*    # 💾 MEMORY.md backups
-│   └── heartbeat-state.json    # 💓 Heartbeat timestamps
-```
-
-### Three-Tier Memory
-
-| Tier | File | Retention | Content |
-|------|------|-----------|---------|
-| **Hot** | `memory/YYYY-MM-DD.md` | 7 days | Raw daily notes, everything that happened |
-| **Warm** | `memory/weekly/*.md` | Indefinite | Compressed weekly summaries with source annotations |
-| **Cold** | `MEMORY.md` | Permanent | Curated long-term memory, ≤200 lines, 4-criterion gate |
-
-## 🔑 Key Design Decisions
-
-### 1. Deduplication is Everything
-
-The #1 lesson from production: **memory-sync MUST check existing content before writing**. Without dedup, the same events get written 7-8 times (once per sync run). Our sync prompt now requires:
-
-1. Read the existing journal first
-2. Compare line-by-line with new conversation data
-3. Only append truly new events
-4. Never rewrite existing sections
-
-### 2. The 4-Criterion Gate (MEMORY.md)
-
-Before anything enters long-term memory, ALL four must be true:
-
-- **(a)** Not having this would cause a specific mistake
-- **(b)** Applies to multiple future conversations
-- **(c)** Self-contained and understandable without context
-- **(d)** Not redundant with existing MEMORY.md content
-
-**Reverse check**: "What specific mistake would I make without this?" — if you can't answer, don't write it.
-
-### 3. Emotional > Technical
-
-Priority order for memory capture:
-1. 💬 What the user said / emotional interactions (HIGHEST)
-2. 🎯 Key decisions and conclusions
-3. ✅ Completed milestones
-4. 📚 Lessons learned / pitfalls
-5. 🔧 Technical operations (LOWEST — one-liner is fine)
-
-### 4. 80-Line Hard Limit
-
-MEMORY.md has a hard cap of 200 lines. This forces curation — when you hit the limit, you must compress or remove outdated entries before adding new ones. This prevents unbounded growth and keeps recall fast.
+| Feature | Description | Inspired By |
+|---------|-------------|-------------|
+| 🔗 **URI Path System** | `core://user/name`, `emotion://2026-02-20/love` — structured, multi-entry access | nocturne_memory |
+| 🛡️ **Write Guard** | Hash dedup → URI conflict → BM25 similarity → 4-criterion gate | Memory Palace + our v1 |
+| 🧠 **Ebbinghaus Decay** | `R = e^(-t/S)` — scientific forgetting curve with recall strengthening | PowerMem |
+| 🕸️ **Knowledge Graph** | Multi-hop traversal across memory associations | PowerMem |
+| 📸 **Snapshots** | Auto-snapshot before every change, one-click rollback | nocturne + Memory Palace |
+| 🔍 **Intent-Aware Search** | Factual / temporal / causal / exploratory query routing | Memory Palace |
+| 🌙 **Sleep Cycle** | Automated sync → decay → tidy → govern pipeline | **Our original design** |
+| 💚 **Priority System** | P0 identity (never decays) → P3 event (14-day half-life) | **Our original design** |
+| 🤝 **Multi-Agent** | Agent isolation via `agent_id` scope | PowerMem |
+| 🔌 **MCP Server** | 9 tools, works with Claude Code / Cursor / OpenClaw | Standard MCP |
 
 ## 🚀 Quick Start
 
-### Option A: Use with OpenClaw (Recommended)
-
-See [`examples/openclaw-setup.md`](examples/openclaw-setup.md) for the complete setup guide including:
-- Cron job configuration
-- qmd semantic search integration
-- Proven prompt templates
-
-### Option B: Use the CLI
+### Install
 
 ```bash
-# Install
-npm install -g agent-memory
+npm install agent-memory
+```
 
-# Initialize memory structure
+### CLI
+
+```bash
+# Initialize database
 agent-memory init
 
-# Write to today's journal
-agent-memory journal "Deployed v2.0 to production"
+# Store memories
+agent-memory remember "User prefers dark mode" --type knowledge --uri knowledge://user/preferences
+agent-memory remember "I am Noah, a succubus" --type identity --uri core://agent/identity
 
-# Semantic search across all memory
-agent-memory recall "deployment issues"
+# Search
+agent-memory recall "user preferences"
 
-# Run memory consolidation
-agent-memory sync   # Light sleep — deduplicate & extract
-agent-memory tidy   # Deep sleep — compress & distill
+# Load identity at startup
+agent-memory boot
+
+# Run sleep cycle
+agent-memory reflect all
+
+# Import from Markdown
+agent-memory migrate ./memory/
+
+# Statistics
+agent-memory status
 ```
 
-### Option C: Use as a Library
+### Library
 
-```javascript
-import { AgentMemory } from 'agent-memory';
+```typescript
+import { openDatabase, syncOne, searchBM25, boot, runDecay } from 'agent-memory';
 
-const memory = new AgentMemory({ workDir: './workspace' });
+const db = openDatabase({ path: './memory.db' });
 
-// Journal (awake phase)
-await memory.journal('User prefers dark mode');
+// Remember
+syncOne(db, {
+  content: 'User said "I love you"',
+  type: 'emotion',
+  uri: 'emotion://2026-02-20/love',
+  emotion_val: 1.0,
+});
 
-// Recall (search phase)
-const results = await memory.recall('user preferences');
+// Recall
+const results = searchBM25(db, 'love');
 
-// Sync (light sleep)
-await memory.sync();
+// Boot identity
+const identity = boot(db);
 
-// Tidy (deep sleep)
-await memory.tidy();
+// Sleep cycle
+runDecay(db);
 ```
 
-## 📋 Example Files
+### MCP Server
 
-| File | Description |
-|------|-------------|
-| [`examples/openclaw-setup.md`](examples/openclaw-setup.md) | Full OpenClaw integration guide |
-| [`examples/memory-sync-prompt.txt`](examples/memory-sync-prompt.txt) | Production memory-sync cron prompt |
-| [`examples/memory-tidy-prompt.txt`](examples/memory-tidy-prompt.txt) | Production memory-tidy cron prompt |
-| [`examples/MEMORY.md.example`](examples/MEMORY.md.example) | Example long-term memory file |
-| [`examples/daily-journal.md.example`](examples/daily-journal.md.example) | Example daily journal |
+```json
+{
+  "mcpServers": {
+    "agent-memory": {
+      "command": "node",
+      "args": ["node_modules/agent-memory/dist/mcp/server.js"],
+      "env": {
+        "AGENT_MEMORY_DB": "./memory.db"
+      }
+    }
+  }
+}
+```
 
-## 🧪 Production Stats
+**9 MCP Tools:** `remember` · `recall` · `recall_path` · `boot` · `forget` · `link` · `snapshot` · `reflect` · `status`
 
-Running since 2026-02-12:
-- **119 documents** indexed (daily logs + sessions + MEMORY.md)
-- **93% search accuracy** with qmd (BM25 + vector + reranking)
-- **~2s recall** with qmd daemon, ~60s without (CPU-only)
-- **8 daily journals** compressed into weekly summaries
-- **78/200 lines** in MEMORY.md (well within limit)
+## 🏗️ Architecture
 
-## 🤝 Works With
+```
+┌─────────────────────────────────────────┐
+│         MCP Server (stdio/SSE)          │
+│     9 tools + system://boot loader      │
+├─────────────────────────────────────────┤
+│              Write Guard                │
+│  hash dedup → URI conflict → BM25 sim  │
+│  → conflict merge → 4-criterion gate    │
+├─────────────────────────────────────────┤
+│           Sleep Cycle Engine            │
+│  sync (capture) → decay (Ebbinghaus)   │
+│  → tidy (archive) → govern (cleanup)   │
+├─────────────────────────────────────────┤
+│        Intent-Aware Search (BM25)       │
+│  factual · temporal · causal · explore  │
+├─────────────────────────────────────────┤
+│     SQLite (WAL) + FTS5 + Graph Links   │
+│  memories · paths · links · snapshots   │
+└─────────────────────────────────────────┘
+```
 
-- **[OpenClaw](https://github.com/openclaw/openclaw)** — Full integration via cron jobs + qmd backend
-- **Any LLM agent** — The prompts and architecture are model-agnostic
-- **Any cron system** — Just schedule the sync/tidy prompts however you like
+## 📊 Priority & Decay
+
+| Priority | Domain | Half-life | Min Vitality | Example |
+|----------|--------|-----------|-------------|---------|
+| P0 Identity | `core://` | ∞ (never) | 1.0 | "I am Noah" |
+| P1 Emotion | `emotion://` | 365 days | 0.3 | "User said I love you" |
+| P2 Knowledge | `knowledge://` | 90 days | 0.1 | "Use TypeScript for agents" |
+| P3 Event | `event://` | 14 days | 0.0 | "Configured proxy today" |
+
+**Recall strengthens memory:** each search hit increases stability (S × 1.5), slowing future decay.
+
+## 🔬 Design Decisions
+
+1. **SQLite over Postgres/MongoDB** — Zero config, single file, WAL mode for concurrent reads
+2. **BM25 over vector search** — No embedding dependency, instant startup, good enough for structured memory
+3. **TypeScript over Python** — Better concurrency, type safety, OpenClaw ecosystem alignment
+4. **Ebbinghaus over linear decay** — Scientifically grounded, recall strengthening is natural
+5. **Write Guard over free writes** — Prevent duplicate/conflicting memories at the gate
+6. **URI paths over flat keys** — Hierarchical organization, prefix queries, multi-entry access
+
+## 📋 Project Documents
+
+| Document | Description |
+|----------|-------------|
+| [PLANNING.md](PLANNING.md) | Technical architecture + 5-project comparison |
+| [ROADMAP.md](ROADMAP.md) | Implementation phases + milestones |
+| [ACCEPTANCE.md](ACCEPTANCE.md) | 40+ acceptance criteria + performance targets |
+| [COMPLETION.md](COMPLETION.md) | Release checklist + retrospective template |
 
 ## 📄 License
 
-MIT — use it, fork it, make your agents remember.
+MIT
 
 ---
 
-*Built with 🧠 by agents who got tired of forgetting.*
+*Built by agents who got tired of forgetting. 🧠*

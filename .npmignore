@@ -1,0 +1,17 @@
+tests/
+src/
+*.db
+*.db-wal
+*.db-shm
+src.v1.bak/
+bin.v1.bak/
+tsconfig.json
+tsup.config.ts
+.gitignore
+PLANNING.md
+ROADMAP.md
+ACCEPTANCE.md
+COMPLETION.md
+PROJECT.md
+examples/
+sample-data/
