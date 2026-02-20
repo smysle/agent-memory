@@ -3518,7 +3518,7 @@ var $ZodUnion = /* @__PURE__ */ $constructor("$ZodUnion", (inst, def) => {
   defineLazy(inst._zod, "pattern", () => {
     if (def.options.every((o) => o._zod.pattern)) {
       const patterns = def.options.map((o) => o._zod.pattern);
-      return new RegExp(`^(${patterns.map((p2) => cleanRegex(p2.source)).join("|")})$`);
+      return new RegExp(`^(${patterns.map((p) => cleanRegex(p.source)).join("|")})$`);
     }
     return void 0;
   });
@@ -10195,9 +10195,9 @@ var $ZodRegistry = class {
     return this;
   }
   get(schema) {
-    const p2 = schema._zod.parent;
-    if (p2) {
-      const pm = { ...this.get(p2) ?? {} };
+    const p = schema._zod.parent;
+    if (p) {
+      const pm = { ...this.get(p) ?? {} };
       delete pm.id;
       const f = { ...pm, ...this._map.get(schema) };
       return Object.keys(f).length ? f : void 0;
@@ -14314,71 +14314,70 @@ function buildFtsQuery(text) {
 }
 
 // src/search/intent.ts
-function p(pattern, weight = 1) {
-  return { pattern, weight };
-}
+init_tokenizer();
 var INTENT_PATTERNS = {
   factual: [
     // English
-    p(/^(what|who|where|which)\b/i, 1.5),
-    p(/^(how much|how many)\b/i, 1.2),
-    p(/\b(name|address|number|password|config|setting|version)\b/i),
-    // Chinese - expanded
-    p(/是(什么|谁|哪|啥)/, 1.5),
-    p(/叫(什么|啥)/, 1.2),
-    p(/(名字|地址|号码|密码|配置|设置|版本|账号|邮箱)/),
-    p(/(多少|几个|哪个|哪些)/),
-    p(/有没有/),
-    p(/(是否|能不能|可不可以)/),
-    p(/什么意思/),
-    p(/怎么(用|装|配|设|弄)/, 1.2)
-    // "how to use/install/configure"
+    /^(what|who|where|which|how much|how many)\b/i,
+    /\b(name|address|number|password|config|setting)\b/i,
+    // Chinese - questions about facts
+    /是(什么|谁|哪|啥)/,
+    /叫(什么|啥)/,
+    /(名字|地址|号码|密码|配置|设置|账号|邮箱|链接|版本)/,
+    /(多少|几个|哪个|哪些|哪里)/,
+    // Chinese - lookup patterns
+    /(查一下|找一下|看看|搜一下)/,
+    /(.+)是什么$/
   ],
   temporal: [
     // English
-    p(/^(when|what time|how long)\b/i, 1.5),
-    p(/(yesterday|today|tomorrow|last week|recently|ago|before|after)\b/i, 1.2),
-    p(/(this morning|tonight|this week|last month|next)\b/i),
-    p(/\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b/, 1.5),
-    // date patterns
-    // Chinese - expanded
-    p(/什么时候/, 1.5),
-    p(/(昨天|今天|明天|前天|后天)/, 1.2),
-    p(/(上周|这周|下周|上个月|这个月|下个月)/),
-    p(/(最近|以前|之前|之后|刚才|刚刚)/),
-    p(/(几月|几号|几点|几天|多久)/),
-    p(/(早上|中午|下午|晚上|凌晨)/),
-    p(/(第一次|上次|那次|每次)/),
-    p(/\d+月\d+[日号]/, 1.5)
+    /^(when|what time|how long)\b/i,
+    /\b(yesterday|today|tomorrow|last week|recently|ago|before|after)\b/i,
+    /\b(first|latest|newest|oldest|previous|next)\b/i,
+    // Chinese - time expressions
+    /什么时候/,
+    /(昨天|今天|明天|上周|下周|最近|以前|之前|之后|刚才|刚刚)/,
+    /(几月|几号|几点|多久|多长时间)/,
+    /(上次|下次|第一次|最后一次|那天|那时)/,
+    // Date patterns
+    /\d{4}[-/.]\d{1,2}/,
+    /\d{1,2}月\d{1,2}[日号]/,
+    // Chinese - temporal context
+    /(历史|记录|日志|以来|至今|期间)/
   ],
   causal: [
     // English
-    p(/^(why|how come|what caused)\b/i, 1.5),
-    p(/\b(because|due to|reason|caused by|result of)\b/i),
-    p(/\b(lead to|consequence|therefore|thus)\b/i),
-    // Chinese - expanded
-    p(/为(什么|啥|何)/, 1.5),
-    p(/(原因|因为|所以|导致|造成)/),
-    p(/怎么(回事|了|会)/, 1.2),
-    p(/(为啥|咋回事|咋了)/),
-    p(/(结果|后果|影响)/),
-    p(/(出了什么|发生了什么)/)
+    /^(why|how come|what caused)\b/i,
+    /\b(because|due to|reason|cause|result)\b/i,
+    // Chinese - causal questions
+    /为(什么|啥|何)/,
+    /(原因|导致|造成|引起|因为|所以|结果)/,
+    /(怎么回事|怎么了|咋回事|咋了)/,
+    /(为啥|凭啥|凭什么)/,
+    // Chinese - problem/diagnosis
+    /(出(了|了什么)?问题|报错|失败|出错|bug)/
   ],
   exploratory: [
     // English
-    p(/^(how|tell me about|explain|describe)\b/i, 1.2),
-    p(/^(what do you think|what about|any)\b/i),
-    p(/\b(overview|summary|example|compare|difference)\b/i),
-    // Chinese - expanded
-    p(/(怎么样|怎样)/, 1.2),
-    p(/(介绍|说说|讲讲|聊聊)/),
-    p(/(有哪些|有什么)/),
-    p(/关于/, 1.2),
-    p(/(总结|概述|对比|区别|比较)/),
-    p(/(好不好|行不行|推荐)/),
-    p(/(看看|想想|了解)/),
-    p(/(经验|心得|总结|教训)/)
+    /^(how|tell me about|explain|describe|show me)\b/i,
+    /^(what do you think|what about|any)\b/i,
+    /\b(overview|summary|list|compare)\b/i,
+    // Chinese - exploratory
+    /(怎么样|怎样|如何)/,
+    /(介绍|说说|讲讲|聊聊|谈谈)/,
+    /(有哪些|有什么|有没有)/,
+    /(关于|对于|至于|关联)/,
+    /(总结|概括|梳理|回顾|盘点)/,
+    // Chinese - opinion/analysis
+    /(看法|想法|意见|建议|评价|感觉|觉得)/,
+    /(对比|比较|区别|差异|优缺点)/
   ]
+};
+var CN_STRUCTURE_BOOSTS = {
+  factual: [/^.{1,6}(是什么|叫什么|在哪)/, /^(谁|哪)/],
+  temporal: [/^(什么时候|上次|最近)/, /(时间|日期)$/],
+  causal: [/^(为什么|为啥)/, /(为什么|怎么回事)$/],
+  exploratory: [/^(怎么|如何|说说)/, /(哪些|什么样)$/]
 };
 function classifyIntent(query) {
   const scores = {
@@ -14388,11 +14387,23 @@ function classifyIntent(query) {
     causal: 0
   };
   for (const [intent, patterns] of Object.entries(INTENT_PATTERNS)) {
-    for (const { pattern, weight } of patterns) {
+    for (const pattern of patterns) {
       if (pattern.test(query)) {
-        scores[intent] += weight;
+        scores[intent] += 1;
       }
     }
+  }
+  for (const [intent, patterns] of Object.entries(CN_STRUCTURE_BOOSTS)) {
+    for (const pattern of patterns) {
+      if (pattern.test(query)) {
+        scores[intent] += 0.5;
+      }
+    }
+  }
+  const tokens = tokenize(query);
+  const totalPatternScore = Object.values(scores).reduce((a, b) => a + b, 0);
+  if (totalPatternScore === 0 && tokens.length <= 3) {
+    scores.factual += 1;
   }
   let maxIntent = "factual";
   let maxScore = 0;
@@ -14403,7 +14414,7 @@ function classifyIntent(query) {
     }
   }
   const totalScore = Object.values(scores).reduce((a, b) => a + b, 0);
-  const confidence = totalScore > 0 ? Math.min(0.95, 0.3 + maxScore / totalScore * 0.65) : 0.5;
+  const confidence = totalScore > 0 ? Math.min(0.95, maxScore / totalScore) : 0.5;
   return { intent: maxIntent, confidence };
 }
 function getStrategy(intent) {
@@ -14848,9 +14859,9 @@ function createMcpServer(dbPath, agentId) {
       }
       const paths = getPathsByPrefix(db, uri);
       if (paths.length > 0) {
-        const memories = paths.map((p2) => {
-          const m = getMemory(db, p2.memory_id);
-          return { uri: p2.uri, content: m?.content, type: m?.type, priority: m?.priority };
+        const memories = paths.map((p) => {
+          const m = getMemory(db, p.memory_id);
+          return { uri: p.uri, content: m?.content, type: m?.type, priority: m?.priority };
         });
         return {
           content: [{

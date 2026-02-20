@@ -170,7 +170,8 @@ interface IntentResult {
 }
 /**
  * Classify the intent of a search query.
- * Uses weighted keyword scoring with Chinese + English support.
+ * Uses keyword pattern matching + structural analysis.
+ * Enhanced for Chinese with jieba-aware token analysis.
  */
 declare function classifyIntent(query: string): IntentResult;
 /**
