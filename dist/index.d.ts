@@ -133,8 +133,8 @@ interface GuardResult {
  * Pipeline:
  * 1. Hash dedup (exact content match → skip)
  * 2. URI conflict (URI exists → update path)
- * 3. BM25 similarity (>0.85 → conflict detection → merge or update)
- * 4. Four-criterion gate (for P0/P1 only)
+ * 3. BM25 similarity (dynamic threshold → merge or update)
+ * 4. Four-criterion gate: Specificity, Novelty, Relevance, Coherence
  */
 declare function guard(db: Database.Database, input: CreateMemoryInput & {
     uri?: string;
@@ -170,7 +170,7 @@ interface IntentResult {
 }
 /**
  * Classify the intent of a search query.
- * Uses keyword scoring — no LLM needed.
+ * Uses weighted keyword scoring with Chinese + English support.
  */
 declare function classifyIntent(query: string): IntentResult;
 /**

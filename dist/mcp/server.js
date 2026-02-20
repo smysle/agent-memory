@@ -3518,7 +3518,7 @@ var $ZodUnion = /* @__PURE__ */ $constructor("$ZodUnion", (inst, def) => {
   defineLazy(inst._zod, "pattern", () => {
     if (def.options.every((o) => o._zod.pattern)) {
       const patterns = def.options.map((o) => o._zod.pattern);
-      return new RegExp(`^(${patterns.map((p) => cleanRegex(p.source)).join("|")})$`);
+      return new RegExp(`^(${patterns.map((p2) => cleanRegex(p2.source)).join("|")})$`);
     }
     return void 0;
   });
@@ -10195,9 +10195,9 @@ var $ZodRegistry = class {
     return this;
   }
   get(schema) {
-    const p = schema._zod.parent;
-    if (p) {
-      const pm = { ...this.get(p) ?? {} };
+    const p2 = schema._zod.parent;
+    if (p2) {
+      const pm = { ...this.get(p2) ?? {} };
       delete pm.id;
       const f = { ...pm, ...this._map.get(schema) };
       return Object.keys(f).length ? f : void 0;
@@ -14314,44 +14314,70 @@ function buildFtsQuery(text) {
 }
 
 // src/search/intent.ts
+function p(pattern, weight = 1) {
+  return { pattern, weight };
+}
 var INTENT_PATTERNS = {
   factual: [
-    /^(what|who|where|which|how much|how many)/i,
-    /是(什么|谁|哪)/,
-    /叫什么/,
-    /名字/,
-    /地址/,
-    /号码/,
-    /密码/,
-    /配置/,
-    /设置/
+    // English
+    p(/^(what|who|where|which)\b/i, 1.5),
+    p(/^(how much|how many)\b/i, 1.2),
+    p(/\b(name|address|number|password|config|setting|version)\b/i),
+    // Chinese - expanded
+    p(/是(什么|谁|哪|啥)/, 1.5),
+    p(/叫(什么|啥)/, 1.2),
+    p(/(名字|地址|号码|密码|配置|设置|版本|账号|邮箱)/),
+    p(/(多少|几个|哪个|哪些)/),
+    p(/有没有/),
+    p(/(是否|能不能|可不可以)/),
+    p(/什么意思/),
+    p(/怎么(用|装|配|设|弄)/, 1.2)
+    // "how to use/install/configure"
   ],
   temporal: [
-    /^(when|what time|how long)/i,
-    /(yesterday|today|last week|recently|ago|before|after)/i,
-    /什么时候/,
-    /(昨天|今天|上周|最近|以前|之前|之后)/,
-    /\d{4}[-/]\d{1,2}/,
-    /(几月|几号|几点)/
+    // English
+    p(/^(when|what time|how long)\b/i, 1.5),
+    p(/(yesterday|today|tomorrow|last week|recently|ago|before|after)\b/i, 1.2),
+    p(/(this morning|tonight|this week|last month|next)\b/i),
+    p(/\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b/, 1.5),
+    // date patterns
+    // Chinese - expanded
+    p(/什么时候/, 1.5),
+    p(/(昨天|今天|明天|前天|后天)/, 1.2),
+    p(/(上周|这周|下周|上个月|这个月|下个月)/),
+    p(/(最近|以前|之前|之后|刚才|刚刚)/),
+    p(/(几月|几号|几点|几天|多久)/),
+    p(/(早上|中午|下午|晚上|凌晨)/),
+    p(/(第一次|上次|那次|每次)/),
+    p(/\d+月\d+[日号]/, 1.5)
   ],
   causal: [
-    /^(why|how come|what caused)/i,
-    /^(because|due to|reason)/i,
-    /为什么/,
-    /原因/,
-    /导致/,
-    /怎么回事/,
-    /为啥/
+    // English
+    p(/^(why|how come|what caused)\b/i, 1.5),
+    p(/\b(because|due to|reason|caused by|result of)\b/i),
+    p(/\b(lead to|consequence|therefore|thus)\b/i),
+    // Chinese - expanded
+    p(/为(什么|啥|何)/, 1.5),
+    p(/(原因|因为|所以|导致|造成)/),
+    p(/怎么(回事|了|会)/, 1.2),
+    p(/(为啥|咋回事|咋了)/),
+    p(/(结果|后果|影响)/),
+    p(/(出了什么|发生了什么)/)
   ],
   exploratory: [
-    /^(how|tell me about|explain|describe)/i,
-    /^(what do you think|what about)/i,
-    /怎么样/,
-    /介绍/,
-    /说说/,
-    /讲讲/,
-    /有哪些/,
-    /关于/
+    // English
+    p(/^(how|tell me about|explain|describe)\b/i, 1.2),
+    p(/^(what do you think|what about|any)\b/i),
+    p(/\b(overview|summary|example|compare|difference)\b/i),
+    // Chinese - expanded
+    p(/(怎么样|怎样)/, 1.2),
+    p(/(介绍|说说|讲讲|聊聊)/),
+    p(/(有哪些|有什么)/),
+    p(/关于/, 1.2),
+    p(/(总结|概述|对比|区别|比较)/),
+    p(/(好不好|行不行|推荐)/),
+    p(/(看看|想想|了解)/),
+    p(/(经验|心得|总结|教训)/)
   ]
 };
 function classifyIntent(query) {
@@ -14362,9 +14388,9 @@ function classifyIntent(query) {
     causal: 0
   };
   for (const [intent, patterns] of Object.entries(INTENT_PATTERNS)) {
-    for (const pattern of patterns) {
+    for (const { pattern, weight } of patterns) {
       if (pattern.test(query)) {
-        scores[intent] += 1;
+        scores[intent] += weight;
       }
     }
   }
@@ -14377,7 +14403,7 @@ function classifyIntent(query) {
     }
   }
   const totalScore = Object.values(scores).reduce((a, b) => a + b, 0);
-  const confidence = totalScore > 0 ? maxScore / totalScore : 0.5;
+  const confidence = totalScore > 0 ? Math.min(0.95, 0.3 + maxScore / totalScore * 0.65) : 0.5;
   return { intent: maxIntent, confidence };
 }
 function getStrategy(intent) {
@@ -14420,6 +14446,7 @@ init_memory();
 
 // src/core/guard.ts
 init_memory();
+init_tokenizer();
 function guard(db, input) {
   const hash2 = contentHash(input.content);
   const agentId = input.agent_id ?? "default";
@@ -14437,40 +14464,85 @@ function guard(db, input) {
       };
     }
   }
-  const similar = db.prepare(
-    `SELECT m.id, m.content, m.type, rank
-       FROM memories_fts f
-       JOIN memories m ON m.id = f.id
-       WHERE memories_fts MATCH ? AND m.agent_id = ?
-       ORDER BY rank
-       LIMIT 3`
-  ).all(escapeFts(input.content), agentId);
-  if (similar.length > 0 && similar[0].rank < -10) {
-    const existing = similar[0];
-    if (existing.type === input.type) {
-      const merged = `${existing.content}
+  const ftsTokens = tokenize(input.content.slice(0, 200));
+  const ftsQuery = ftsTokens.length > 0 ? ftsTokens.slice(0, 8).map((w) => `"${w}"`).join(" OR ") : null;
+  if (ftsQuery) {
+    try {
+      const similar = db.prepare(
+        `SELECT m.id, m.content, m.type, rank
+           FROM memories_fts f
+           JOIN memories m ON m.id = f.id
+           WHERE memories_fts MATCH ? AND m.agent_id = ?
+           ORDER BY rank
+           LIMIT 3`
+      ).all(ftsQuery, agentId);
+      if (similar.length > 0) {
+        const topRank = Math.abs(similar[0].rank);
+        const tokenCount = ftsTokens.length;
+        const dynamicThreshold = tokenCount * 1.5;
+        if (topRank > dynamicThreshold) {
+          const existing = similar[0];
+          if (existing.type === input.type) {
+            const merged = `${existing.content}
 
 [Updated] ${input.content}`;
-      return {
-        action: "merge",
-        reason: "Similar content found, merging",
-        existingId: existing.id,
-        mergedContent: merged
-      };
+            return {
+              action: "merge",
+              reason: `Similar content found (score=${topRank.toFixed(1)}, threshold=${dynamicThreshold.toFixed(1)}), merging`,
+              existingId: existing.id,
+              mergedContent: merged
+            };
+          }
+        }
+      }
+    } catch {
     }
   }
-  const priority = input.priority ?? (input.type === "identity" ? 0 : input.type === "emotion" ? 1 : 2);
-  if (priority <= 1) {
-    if (!input.content.trim()) {
-      return { action: "skip", reason: "Empty content rejected by gate" };
-    }
+  const gateResult = fourCriterionGate(input);
+  if (!gateResult.pass) {
+    return { action: "skip", reason: `Gate rejected: ${gateResult.failedCriteria.join(", ")}` };
   }
   return { action: "add", reason: "Passed all guard checks" };
 }
-function escapeFts(text) {
-  const words = text.slice(0, 100).replace(/[^\w\u4e00-\u9fff\s]/g, " ").split(/\s+/).filter((w) => w.length > 1).slice(0, 5);
-  if (words.length === 0) return '""';
-  return words.map((w) => `"${w}"`).join(" OR ");
+function fourCriterionGate(input) {
+  const content = input.content.trim();
+  const failed = [];
+  const priority = input.priority ?? (input.type === "identity" ? 0 : input.type === "emotion" ? 1 : input.type === "knowledge" ? 2 : 3);
+  const minLength = priority <= 1 ? 4 : 8;
+  const specificity = content.length >= minLength ? Math.min(1, content.length / 50) : 0;
+  if (specificity === 0) failed.push(`specificity (too short: ${content.length} < ${minLength} chars)`);
+  const tokens = tokenize(content);
+  const novelty = tokens.length >= 1 ? Math.min(1, tokens.length / 5) : 0;
+  if (novelty === 0) failed.push("novelty (no meaningful tokens after filtering)");
+  const hasCJK = /[\u4e00-\u9fff]/.test(content);
+  const hasCapitalized = /[A-Z][a-z]+/.test(content);
+  const hasNumbers = /\d+/.test(content);
+  const hasURI = /\w+:\/\//.test(content);
+  const hasEntityMarkers = /[@#]/.test(content);
+  const hasMeaningfulLength = content.length >= 15;
+  const topicSignals = [hasCJK, hasCapitalized, hasNumbers, hasURI, hasEntityMarkers, hasMeaningfulLength].filter(Boolean).length;
+  const relevance = topicSignals >= 1 ? Math.min(1, topicSignals / 3) : 0;
+  if (relevance === 0) failed.push("relevance (no identifiable topics/entities)");
+  const allCaps = content === content.toUpperCase() && content.length > 20 && /^[A-Z\s]+$/.test(content);
+  const hasWhitespaceOrPunctuation = /[\s，。！？,.!?；;：:]/.test(content) || content.length < 30;
+  const excessiveRepetition = /(.)\1{9,}/.test(content);
+  let coherence = 1;
+  if (allCaps) {
+    coherence -= 0.5;
+  }
+  if (!hasWhitespaceOrPunctuation) {
+    coherence -= 0.3;
+  }
+  if (excessiveRepetition) {
+    coherence -= 0.5;
+  }
+  coherence = Math.max(0, coherence);
+  if (coherence < 0.3) failed.push("coherence (garbled or malformed content)");
+  return {
+    pass: failed.length === 0,
+    scores: { specificity, novelty, relevance, coherence },
+    failedCriteria: failed
+  };
 }
 
 // src/sleep/sync.ts
@@ -14776,9 +14848,9 @@ function createMcpServer(dbPath, agentId) {
       }
       const paths = getPathsByPrefix(db, uri);
       if (paths.length > 0) {
-        const memories = paths.map((p) => {
-          const m = getMemory(db, p.memory_id);
-          return { uri: p.uri, content: m?.content, type: m?.type, priority: m?.priority };
+        const memories = paths.map((p2) => {
+          const m = getMemory(db, p2.memory_id);
+          return { uri: p2.uri, content: m?.content, type: m?.type, priority: m?.priority };
         });
         return {
           content: [{

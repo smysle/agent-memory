@@ -44,14 +44,14 @@ describe("Sleep Cycle", () => {
   });
 
   it("syncOne updates when URI exists", () => {
-    const first = syncOne(db, { content: "original", type: "identity", uri: "core://test" });
+    const first = syncOne(db, { content: "Original identity memory content", type: "identity", uri: "core://test" });
     expect(first.action).toBe("added");
 
-    const second = syncOne(db, { content: "updated version", type: "identity", uri: "core://test" });
+    const second = syncOne(db, { content: "Updated identity memory version", type: "identity", uri: "core://test" });
     expect(second.action).toBe("updated");
 
     const mem = getMemory(db, second.memoryId!)!;
-    expect(mem.content).toBe("updated version");
+    expect(mem.content).toBe("Updated identity memory version");
   });
 
   it("syncBatch processes multiple items in transaction", () => {
