@@ -88,7 +88,7 @@ export interface DbOptions {
  * Type guard for SQLite count query results.
  * Validates that a row has a numeric 'c' property.
  */
-function isCountRow(row: unknown): row is { c: number } {
+export function isCountRow(row: unknown): row is { c: number } {
   return row !== null && typeof row === "object" && "c" in (row as Record<string, unknown>) && typeof (row as Record<string, unknown>).c === "number";
 }
 
