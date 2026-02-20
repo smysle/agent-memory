@@ -46,7 +46,7 @@ AI Agent 每次会话都会遗忘一切。上下文窗口有限，对话历史�
 ### 安装
 
 ```bash
-npm install agent-memory
+npm install @smyslenny/agent-memory
 ```
 
 ### 命令行
@@ -78,7 +78,7 @@ agent-memory status
 ### 作为库使用
 
 ```typescript
-import { openDatabase, syncOne, searchBM25, boot, runDecay } from 'agent-memory';
+import { openDatabase, syncOne, searchBM25, boot, runDecay } from '@smyslenny/agent-memory';
 
 const db = openDatabase({ path: './memory.db' });
 
@@ -105,9 +105,9 @@ runDecay(db);
 ```json
 {
   "mcpServers": {
-    "agent-memory": {
+    "@smyslenny/agent-memory": {
       "command": "node",
-      "args": ["node_modules/agent-memory/dist/mcp/server.js"],
+      "args": ["node_modules/@smyslenny/agent-memory/dist/mcp/server.js"],
       "env": {
         "AGENT_MEMORY_DB": "./memory.db"
       }

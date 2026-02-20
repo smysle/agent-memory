@@ -47,7 +47,7 @@ Inspired by how human brains consolidate memories during sleep, AgentMemory mana
 ### Install
 
 ```bash
-npm install agent-memory
+npm install @smyslenny/agent-memory
 ```
 
 ### CLI
@@ -79,7 +79,7 @@ agent-memory status
 ### Library
 
 ```typescript
-import { openDatabase, syncOne, searchBM25, boot, runDecay } from 'agent-memory';
+import { openDatabase, syncOne, searchBM25, boot, runDecay } from '@smyslenny/agent-memory';
 
 const db = openDatabase({ path: './memory.db' });
 
@@ -106,9 +106,9 @@ runDecay(db);
 ```json
 {
   "mcpServers": {
-    "agent-memory": {
+    "@smyslenny/agent-memory": {
       "command": "node",
-      "args": ["node_modules/agent-memory/dist/mcp/server.js"],
+      "args": ["node_modules/@smyslenny/agent-memory/dist/mcp/server.js"],
       "env": {
         "AGENT_MEMORY_DB": "./memory.db"
       }
