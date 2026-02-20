@@ -37,8 +37,8 @@ Inspired by how human brains consolidate memories during sleep, AgentMemory mana
 | 🕸️ **Knowledge Graph** | Multi-hop traversal across memory associations | PowerMem |
 | 📸 **Snapshots** | Auto-snapshot before every change, one-click rollback | nocturne + Memory Palace |
 | 🔍 **Intent-Aware Search** | Factual / temporal / causal / exploratory query routing | Memory Palace |
-| 🌙 **Sleep Cycle** | Automated sync → decay → tidy → govern pipeline | **Our original design** |
-| 💚 **Priority System** | P0 identity (never decays) → P3 event (14-day half-life) | **Our original design** |
+| 🌙 **Sleep Cycle** | Automated sync → decay → tidy → govern pipeline | - |
+| 💚 **Priority System** | P0 identity (never decays) → P3 event (14-day half-life) | - |
 | 🤝 **Multi-Agent** | Agent isolation via `agent_id` scope | PowerMem |
 | 🔌 **MCP Server** | 9 tools, works with Claude Code / Cursor / OpenClaw | Standard MCP |
 
