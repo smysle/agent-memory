@@ -23,6 +23,7 @@ export { guard, type GuardResult, type GuardAction } from "./core/guard.js";
 
 // Search
 export { searchBM25, type SearchResult } from "./search/bm25.js";
+export { tokenize } from "./search/tokenizer.js";
 export { classifyIntent, getStrategy, type SearchIntent, type IntentResult } from "./search/intent.js";
 export { rerank } from "./search/rerank.js";
 

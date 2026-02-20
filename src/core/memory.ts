@@ -2,6 +2,7 @@
 import { createHash } from "crypto";
 import type Database from "better-sqlite3";
 import { newId, now } from "./db.js";
+import { tokenizeForIndex } from "../search/tokenizer.js";
 
 export type MemoryType = "identity" | "emotion" | "knowledge" | "event";
 export type Priority = 0 | 1 | 2 | 3;
@@ -97,8 +98,8 @@ export function createMemory(db: Database.Database, input: CreateMemoryInput): M
     hash,
   );
 
-  // Sync to FTS index
-  db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(id, input.content);
+  // Sync to FTS index (tokenized for CJK support)
+  db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(id, tokenizeForIndex(input.content));
 
   return getMemory(db, id)!;
 }
@@ -156,7 +157,7 @@ export function updateMemory(
   // Update FTS if content changed
   if (input.content !== undefined) {
     db.prepare("DELETE FROM memories_fts WHERE id = ?").run(id);
-    db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(id, input.content);
+    db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(id, tokenizeForIndex(input.content));
   }
 
   return getMemory(db, id);

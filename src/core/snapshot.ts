@@ -1,6 +1,7 @@
 // AgentMemory v2 — Snapshot system (version control, from nocturne + Memory Palace)
 import type Database from "better-sqlite3";
 import { newId, now } from "./db.js";
+import { tokenizeForIndex } from "../search/tokenizer.js";
 
 export type SnapshotAction = "create" | "update" | "delete" | "merge";
 
@@ -70,7 +71,7 @@ export function rollback(db: Database.Database, snapshotId: string): boolean {
   db.prepare("DELETE FROM memories_fts WHERE id = ?").run(snapshot.memory_id);
   db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(
     snapshot.memory_id,
-    snapshot.content,
+    tokenizeForIndex(snapshot.content),
   );
 
   return true;

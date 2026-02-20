@@ -4,6 +4,7 @@ import { openDatabase } from "../core/db.js";
 import { createMemory, countMemories, listMemories } from "../core/memory.js";
 import { createPath } from "../core/path.js";
 import { searchBM25 } from "../search/bm25.js";
+import { tokenizeForIndex } from "../search/tokenizer.js";
 import { classifyIntent, getStrategy } from "../search/intent.js";
 import { rerank } from "../search/rerank.js";
 import { boot } from "../sleep/boot.js";
@@ -35,6 +36,7 @@ Commands:
   boot                          Load identity memories
   status                        Show statistics
   reflect [decay|tidy|govern|all]  Run sleep cycle
+  reindex                         Rebuild FTS index with jieba tokenizer
   migrate <dir>                 Import from Markdown files
   help                          Show this help
 
@@ -140,6 +142,28 @@ try {
         const r = runGovern(db);
         console.log(`  Govern: ${r.orphanPaths} paths, ${r.orphanLinks} links, ${r.emptyMemories} empty cleaned`);
       }
+      db.close();
+      break;
+    }
+
+    case "reindex": {
+      const db = openDatabase({ path: getDbPath() });
+      const memories = db.prepare("SELECT id, content FROM memories").all() as Array<{ id: string; content: string }>;
+      
+      // Clear and rebuild FTS index
+      db.exec("DELETE FROM memories_fts");
+      const insert = db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)");
+      
+      let count = 0;
+      const txn = db.transaction(() => {
+        for (const mem of memories) {
+          insert.run(mem.id, tokenizeForIndex(mem.content));
+          count++;
+        }
+      });
+      txn();
+      
+      console.log(`🔄 Reindexed ${count} memories with jieba tokenizer`);
       db.close();
       break;
     }

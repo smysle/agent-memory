@@ -155,6 +155,14 @@ declare function searchBM25(db: Database.Database, query: string, opts?: {
     min_vitality?: number;
 }): SearchResult[];
 
+/**
+ * Tokenize text for FTS5 queries.
+ * - Latin/numeric words: split on whitespace, filter len > 1
+ * - CJK text: use jieba cutForSearch, fallback to unigram + bigram
+ * Returns deduplicated token array, max 30 tokens.
+ */
+declare function tokenize(text: string): string[];
+
 type SearchIntent = "factual" | "exploratory" | "temporal" | "causal";
 interface IntentResult {
     intent: SearchIntent;
@@ -272,4 +280,4 @@ declare function boot(db: Database.Database, opts?: {
     corePaths?: string[];
 }): BootResult;
 
-export { type BootResult, type CreateMemoryInput, type GovernResult, type GuardAction, type GuardResult, type IntentResult, type Link, type Memory, type MemoryType, type Path, type Priority, type RelationType, type SearchIntent, type SearchResult, type Snapshot, type SnapshotAction, type SyncInput, type SyncResult, type TidyResult, type UpdateMemoryInput, boot, calculateVitality, classifyIntent, contentHash, countMemories, createLink, createMemory, createPath, createSnapshot, deleteLink, deleteMemory, deletePath, getDecayedMemories, getLinks, getMemory, getOutgoingLinks, getPath, getPathByUri, getPathsByDomain, getPathsByMemory, getPathsByPrefix, getSnapshot, getSnapshots, getStrategy, guard, listMemories, parseUri, recordAccess, rerank, rollback, runDecay, runGovern, runTidy, searchBM25, syncBatch, syncOne, traverse, updateMemory };
+export { type BootResult, type CreateMemoryInput, type GovernResult, type GuardAction, type GuardResult, type IntentResult, type Link, type Memory, type MemoryType, type Path, type Priority, type RelationType, type SearchIntent, type SearchResult, type Snapshot, type SnapshotAction, type SyncInput, type SyncResult, type TidyResult, type UpdateMemoryInput, boot, calculateVitality, classifyIntent, contentHash, countMemories, createLink, createMemory, createPath, createSnapshot, deleteLink, deleteMemory, deletePath, getDecayedMemories, getLinks, getMemory, getOutgoingLinks, getPath, getPathByUri, getPathsByDomain, getPathsByMemory, getPathsByPrefix, getSnapshot, getSnapshots, getStrategy, guard, listMemories, parseUri, recordAccess, rerank, rollback, runDecay, runGovern, runTidy, searchBM25, syncBatch, syncOne, tokenize, traverse, updateMemory };

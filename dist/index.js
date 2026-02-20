@@ -104,6 +104,87 @@ function newId() {
 
 // src/core/memory.ts
 import { createHash } from "crypto";
+
+// src/search/tokenizer.ts
+import { readFileSync } from "fs";
+import { createRequire } from "module";
+var _jieba;
+function getJieba() {
+  if (_jieba !== void 0) return _jieba;
+  try {
+    const req = createRequire(import.meta.url);
+    const { Jieba } = req("@node-rs/jieba");
+    const dictPath = req.resolve("@node-rs/jieba/dict.txt");
+    const dictBuf = readFileSync(dictPath);
+    _jieba = Jieba.withDict(dictBuf);
+  } catch {
+    _jieba = null;
+  }
+  return _jieba;
+}
+var STOPWORDS = /* @__PURE__ */ new Set([
+  "\u7684",
+  "\u4E86",
+  "\u5728",
+  "\u662F",
+  "\u6211",
+  "\u6709",
+  "\u548C",
+  "\u5C31",
+  "\u4E0D",
+  "\u4EBA",
+  "\u90FD",
+  "\u4E00",
+  "\u4E2A",
+  "\u4E0A",
+  "\u4E5F",
+  "\u5230",
+  "\u4ED6",
+  "\u6CA1",
+  "\u8FD9",
+  "\u8981",
+  "\u4F1A",
+  "\u5BF9",
+  "\u8BF4",
+  "\u800C",
+  "\u53BB",
+  "\u4E4B",
+  "\u88AB",
+  "\u5979",
+  "\u628A",
+  "\u90A3"
+]);
+function tokenize(text) {
+  const cleaned = text.replace(/[^\w\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af\s]/g, " ");
+  const tokens = [];
+  const latinWords = cleaned.replace(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g, " ").split(/\s+/).filter((w) => w.length > 1);
+  tokens.push(...latinWords);
+  const cjkChunks = cleaned.match(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]+/g);
+  if (cjkChunks && cjkChunks.length > 0) {
+    const jieba = getJieba();
+    for (const chunk of cjkChunks) {
+      if (jieba) {
+        const words = jieba.cutForSearch(chunk).filter((w) => w.length >= 1);
+        tokens.push(...words);
+      } else {
+        for (const ch of chunk) {
+          tokens.push(ch);
+        }
+        for (let i = 0; i < chunk.length - 1; i++) {
+          tokens.push(chunk[i] + chunk[i + 1]);
+        }
+      }
+    }
+  }
+  const unique = [...new Set(tokens)].filter((t) => t.length > 0 && !STOPWORDS.has(t)).slice(0, 30);
+  return unique;
+}
+function tokenizeForIndex(text) {
+  const tokens = tokenize(text);
+  return tokens.join(" ");
+}
+
+// src/core/memory.ts
 function contentHash(content) {
   return createHash("sha256").update(content.trim()).digest("hex").slice(0, 16);
 }
@@ -151,7 +232,7 @@ function createMemory(db, input) {
     agentId,
     hash
   );
-  db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(id, input.content);
+  db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(id, tokenizeForIndex(input.content));
   return getMemory(db, id);
 }
 function getMemory(db, id) {
@@ -196,7 +277,7 @@ function updateMemory(db, id, input) {
   db.prepare(`UPDATE memories SET ${fields.join(", ")} WHERE id = ?`).run(...values);
   if (input.content !== void 0) {
     db.prepare("DELETE FROM memories_fts WHERE id = ?").run(id);
-    db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(id, input.content);
+    db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(id, tokenizeForIndex(input.content));
   }
   return getMemory(db, id);
 }
@@ -378,7 +459,7 @@ function rollback(db, snapshotId) {
   db.prepare("DELETE FROM memories_fts WHERE id = ?").run(snapshot.memory_id);
   db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(
     snapshot.memory_id,
-    snapshot.content
+    tokenizeForIndex(snapshot.content)
   );
   return true;
 }
@@ -480,23 +561,9 @@ function searchSimple(db, query, agentId, minVitality, limit) {
   }));
 }
 function buildFtsQuery(text) {
-  const cjkRange = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/;
-  const cleaned = text.replace(/[^\w\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af\s]/g, " ");
-  const tokens = [];
-  const latinWords = cleaned.replace(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g, " ").split(/\s+/).filter((w) => w.length > 1);
-  tokens.push(...latinWords);
-  const cjkChars = cleaned.replace(/[^\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g, "");
-  if (cjkChars.length > 0) {
-    for (const ch of cjkChars) {
-      tokens.push(ch);
-    }
-    for (let i = 0; i < cjkChars.length - 1; i++) {
-      tokens.push(cjkChars[i] + cjkChars[i + 1]);
-    }
-  }
-  const unique = [...new Set(tokens)].slice(0, 20);
-  if (unique.length === 0) return null;
-  return unique.map((w) => `"${w}"`).join(" OR ");
+  const tokens = tokenize(text);
+  if (tokens.length === 0) return null;
+  return tokens.map((w) => `"${w}"`).join(" OR ");
 }
 
 // src/search/intent.ts
@@ -857,6 +924,7 @@ export {
   searchBM25,
   syncBatch,
   syncOne,
+  tokenize,
   traverse,
   updateMemory
 };

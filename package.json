@@ -46,6 +46,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "@node-rs/jieba": "^2.0.1",
     "better-sqlite3": "^11.8.1",
     "uuid": "^11.1.0"
   },
