@@ -82,16 +82,39 @@ function searchSimple(
 /**
  * Build FTS5 query from natural language.
  * Extracts meaningful words, joins with OR for flexible matching.
+ * Handles CJK characters by splitting into bigrams for better tokenization.
  */
 function buildFtsQuery(text: string): string | null {
-  const words = text
-    .replace(/[^\w\u4e00-\u9fff\u3040-\u30ff\s]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 1)
-    .slice(0, 10);
+  // Separate CJK characters from Latin/other words
+  const cjkRange = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/;
+  const cleaned = text.replace(/[^\w\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af\s]/g, " ");
 
-  if (words.length === 0) return null;
+  const tokens: string[] = [];
+
+  // Extract Latin/numeric words
+  const latinWords = cleaned
+    .replace(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 1);
+  tokens.push(...latinWords);
+
+  // Extract CJK characters and create unigrams + bigrams
+  const cjkChars = cleaned.replace(/[^\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g, "");
+  if (cjkChars.length > 0) {
+    // Unigrams: each CJK character as a separate token
+    for (const ch of cjkChars) {
+      tokens.push(ch);
+    }
+    // Bigrams: consecutive pairs for compound word matching
+    for (let i = 0; i < cjkChars.length - 1; i++) {
+      tokens.push(cjkChars[i] + cjkChars[i + 1]);
+    }
+  }
+
+  // Deduplicate and limit
+  const unique = [...new Set(tokens)].slice(0, 20);
+  if (unique.length === 0) return null;
 
   // Use OR for broad matching
-  return words.map((w) => `"${w}"`).join(" OR ");
+  return unique.map((w) => `"${w}"`).join(" OR ");
 }

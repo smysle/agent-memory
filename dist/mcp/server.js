@@ -14221,9 +14221,23 @@ function searchSimple(db, query, agentId, minVitality, limit) {
   }));
 }
 function buildFtsQuery(text) {
-  const words = text.replace(/[^\w\u4e00-\u9fff\u3040-\u30ff\s]/g, " ").split(/\s+/).filter((w) => w.length > 1).slice(0, 10);
-  if (words.length === 0) return null;
-  return words.map((w) => `"${w}"`).join(" OR ");
+  const cjkRange = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/;
+  const cleaned = text.replace(/[^\w\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af\s]/g, " ");
+  const tokens = [];
+  const latinWords = cleaned.replace(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g, " ").split(/\s+/).filter((w) => w.length > 1);
+  tokens.push(...latinWords);
+  const cjkChars = cleaned.replace(/[^\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g, "");
+  if (cjkChars.length > 0) {
+    for (const ch of cjkChars) {
+      tokens.push(ch);
+    }
+    for (let i = 0; i < cjkChars.length - 1; i++) {
+      tokens.push(cjkChars[i] + cjkChars[i + 1]);
+    }
+  }
+  const unique = [...new Set(tokens)].slice(0, 20);
+  if (unique.length === 0) return null;
+  return unique.map((w) => `"${w}"`).join(" OR ");
 }
 
 // src/search/intent.ts
