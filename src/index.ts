@@ -20,6 +20,7 @@ export {
   type Snapshot, type SnapshotAction,
 } from "./core/snapshot.js";
 export { guard, type GuardResult, type GuardAction } from "./core/guard.js";
+export { exportMemories, type ExportResult } from "./core/export.js";
 
 // Search
 export { searchBM25, type SearchResult } from "./search/bm25.js";

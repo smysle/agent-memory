@@ -2,6 +2,7 @@
 // AgentMemory v2 — CLI
 import { openDatabase } from "../core/db.js";
 import { createMemory, countMemories, listMemories } from "../core/memory.js";
+import { exportMemories } from "../core/export.js";
 import { createPath } from "../core/path.js";
 import { searchBM25 } from "../search/bm25.js";
 import { tokenizeForIndex } from "../search/tokenizer.js";
@@ -12,8 +13,8 @@ import { runDecay } from "../sleep/decay.js";
 import { runTidy } from "../sleep/tidy.js";
 import { runGovern } from "../sleep/govern.js";
 import { syncOne } from "../sleep/sync.js";
-import { existsSync, readFileSync, readdirSync } from "fs";
-import { resolve, basename } from "path";
+import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from "fs";
+import { resolve, basename, join } from "path";
 import type { MemoryType } from "../core/memory.js";
 
 const args = process.argv.slice(2);
@@ -38,6 +39,7 @@ Commands:
   reflect [decay|tidy|govern|all]  Run sleep cycle
   reindex                         Rebuild FTS index with jieba tokenizer
   migrate <dir>                 Import from Markdown files
+  export <dir>                  Export memories to Markdown files
   help                          Show this help
 
 Environment:
@@ -164,6 +166,19 @@ try {
       txn();
       
       console.log(`🔄 Reindexed ${count} memories with jieba tokenizer`);
+      db.close();
+      break;
+    }
+
+    case "export": {
+      const dir = args[1];
+      if (!dir) { console.error("Usage: agent-memory export <directory>"); process.exit(1); }
+      const dirPath = resolve(dir);
+
+      const db = openDatabase({ path: getDbPath() });
+      const agentId = process.env.AGENT_MEMORY_AGENT_ID ?? "default";
+      const result = exportMemories(db, dirPath, { agent_id: agentId });
+      console.log(`✅ Export complete: ${result.exported} items to ${dirPath} (${result.files.length} files)`);
       db.close();
       break;
     }
