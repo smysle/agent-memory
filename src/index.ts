@@ -1,7 +1,7 @@
 // AgentMemory v2 — Main library entry point
 
 // Core
-export { openDatabase, type DbOptions } from "./core/db.js";
+export { openDatabase, isCountRow, type DbOptions } from "./core/db.js";
 export {
   createMemory, getMemory, updateMemory, deleteMemory, listMemories,
   recordAccess, countMemories, contentHash,
