@@ -5,6 +5,7 @@ import { newId, now } from "./db.js";
 export interface Path {
   id: string;
   memory_id: string;
+  agent_id: string;
   uri: string;
   alias: string | null;
   domain: string;
@@ -26,6 +27,7 @@ export function createPath(
   uri: string,
   alias?: string,
   validDomains?: Set<string>,
+  agent_id?: string,
 ): Path {
   const { domain } = parseUri(uri);
   const domains = validDomains ?? DEFAULT_DOMAINS;
@@ -33,8 +35,15 @@ export function createPath(
     throw new Error(`Invalid domain "${domain}". Valid: ${[...domains].join(", ")}`);
   }
 
+  const memoryAgent = (db.prepare("SELECT agent_id FROM memories WHERE id = ?").get(memoryId) as { agent_id: string } | undefined)?.agent_id;
+  if (!memoryAgent) throw new Error(`Memory not found: ${memoryId}`);
+  if (agent_id && agent_id !== memoryAgent) {
+    throw new Error(`Agent mismatch for path: memory agent_id=${memoryAgent}, requested agent_id=${agent_id}`);
+  }
+  const agentId = agent_id ?? memoryAgent;
+
   // Check URI uniqueness
-  const existing = db.prepare("SELECT id FROM paths WHERE uri = ?").get(uri) as
+  const existing = db.prepare("SELECT id FROM paths WHERE agent_id = ? AND uri = ?").get(agentId, uri) as
     | { id: string }
     | undefined;
   if (existing) {
@@ -43,8 +52,8 @@ export function createPath(
 
   const id = newId();
   db.prepare(
-    "INSERT INTO paths (id, memory_id, uri, alias, domain, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-  ).run(id, memoryId, uri, alias ?? null, domain, now());
+    "INSERT INTO paths (id, memory_id, agent_id, uri, alias, domain, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(id, memoryId, agentId, uri, alias ?? null, domain, now());
 
   return getPath(db, id)!;
 }
@@ -53,24 +62,24 @@ export function getPath(db: Database.Database, id: string): Path | null {
   return (db.prepare("SELECT * FROM paths WHERE id = ?").get(id) as Path) ?? null;
 }
 
-export function getPathByUri(db: Database.Database, uri: string): Path | null {
-  return (db.prepare("SELECT * FROM paths WHERE uri = ?").get(uri) as Path) ?? null;
+export function getPathByUri(db: Database.Database, uri: string, agent_id = "default"): Path | null {
+  return (db.prepare("SELECT * FROM paths WHERE agent_id = ? AND uri = ?").get(agent_id, uri) as Path) ?? null;
 }
 
 export function getPathsByMemory(db: Database.Database, memoryId: string): Path[] {
   return db.prepare("SELECT * FROM paths WHERE memory_id = ?").all(memoryId) as Path[];
 }
 
-export function getPathsByDomain(db: Database.Database, domain: string): Path[] {
+export function getPathsByDomain(db: Database.Database, domain: string, agent_id = "default"): Path[] {
   return db
-    .prepare("SELECT * FROM paths WHERE domain = ? ORDER BY uri")
-    .all(domain) as Path[];
+    .prepare("SELECT * FROM paths WHERE agent_id = ? AND domain = ? ORDER BY uri")
+    .all(agent_id, domain) as Path[];
 }
 
-export function getPathsByPrefix(db: Database.Database, prefix: string): Path[] {
+export function getPathsByPrefix(db: Database.Database, prefix: string, agent_id = "default"): Path[] {
   return db
-    .prepare("SELECT * FROM paths WHERE uri LIKE ? ORDER BY uri")
-    .all(`${prefix}%`) as Path[];
+    .prepare("SELECT * FROM paths WHERE agent_id = ? AND uri LIKE ? ORDER BY uri")
+    .all(agent_id, `${prefix}%`) as Path[];
 }
 
 export function deletePath(db: Database.Database, id: string): boolean {

@@ -40,7 +40,7 @@ export function guard(
 
   // 2. URI conflict — URI already exists, update instead of add
   if (input.uri) {
-    const existingPath = getPathByUri(db, input.uri);
+    const existingPath = getPathByUri(db, input.uri, agentId);
     if (existingPath) {
       return {
         action: "update",

@@ -193,4 +193,17 @@ describe("AgentMemory Core", () => {
     expect(aMemories[0].content).toBe("agent A memory");
     expect(bMemories[0].content).toBe("agent B memory");
   });
+
+  it("isolates URI paths between agents", () => {
+    const a = createMemory(db, { content: "A user name", type: "identity", agent_id: "agent-a" })!;
+    const b = createMemory(db, { content: "B user name", type: "identity", agent_id: "agent-b" })!;
+
+    createPath(db, a.id, "core://user/name");
+    createPath(db, b.id, "core://user/name");
+
+    const aPath = getPathByUri(db, "core://user/name", "agent-a");
+    const bPath = getPathByUri(db, "core://user/name", "agent-b");
+    expect(aPath?.memory_id).toBe(a.id);
+    expect(bPath?.memory_id).toBe(b.id);
+  });
 });

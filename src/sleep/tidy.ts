@@ -22,10 +22,12 @@ export function runTidy(
   opts?: {
     vitalityThreshold?: number;
     maxSnapshotsPerMemory?: number;
+    agent_id?: string;
   },
 ): TidyResult {
   const threshold = opts?.vitalityThreshold ?? 0.05;
   const maxSnapshots = opts?.maxSnapshotsPerMemory ?? 10;
+  const agentId = opts?.agent_id;
 
   let archived = 0;
   let orphansCleaned = 0;
@@ -33,7 +35,7 @@ export function runTidy(
 
   const transaction = db.transaction(() => {
     // 1. Archive decayed memories
-    const decayed = getDecayedMemories(db, threshold);
+    const decayed = getDecayedMemories(db, threshold, agentId ? { agent_id: agentId } : undefined);
     for (const mem of decayed) {
       // Snapshot before delete
       try {
@@ -46,20 +48,34 @@ export function runTidy(
     }
 
     // 2. Clean orphan paths (paths pointing to deleted memories)
-    const orphans = db
-      .prepare(
-        `DELETE FROM paths WHERE memory_id NOT IN (SELECT id FROM memories)`,
-      )
-      .run();
+    const orphans = agentId
+      ? db.prepare(
+        `DELETE FROM paths
+         WHERE agent_id = ?
+           AND memory_id NOT IN (SELECT id FROM memories WHERE agent_id = ?)`,
+      ).run(agentId, agentId)
+      : db.prepare(
+        "DELETE FROM paths WHERE memory_id NOT IN (SELECT id FROM memories)",
+      ).run();
     orphansCleaned = orphans.changes;
 
     // 3. Prune old snapshots (keep only latest N per memory)
-    const memoriesWithSnapshots = db
-      .prepare(
-        `SELECT memory_id, COUNT(*) as cnt FROM snapshots
-         GROUP BY memory_id HAVING cnt > ?`,
-      )
-      .all(maxSnapshots) as Array<{ memory_id: string; cnt: number }>;
+    const memoriesWithSnapshots = agentId
+      ? db
+        .prepare(
+          `SELECT s.memory_id, COUNT(*) as cnt
+           FROM snapshots s
+           JOIN memories m ON m.id = s.memory_id
+           WHERE m.agent_id = ?
+           GROUP BY s.memory_id HAVING cnt > ?`,
+        )
+        .all(agentId, maxSnapshots) as Array<{ memory_id: string; cnt: number }>
+      : db
+        .prepare(
+          `SELECT memory_id, COUNT(*) as cnt FROM snapshots
+           GROUP BY memory_id HAVING cnt > ?`,
+        )
+        .all(maxSnapshots) as Array<{ memory_id: string; cnt: number }>;
 
     for (const { memory_id } of memoriesWithSnapshots) {
       const pruned = db

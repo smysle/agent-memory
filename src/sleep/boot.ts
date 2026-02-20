@@ -38,7 +38,7 @@ export function boot(
   // 2. Load memories at configured core paths
   const bootPaths: string[] = [];
   for (const uri of corePaths) {
-    const path = getPathByUri(db, uri);
+    const path = getPathByUri(db, uri, agentId);
     if (path) {
       bootPaths.push(uri);
       if (!memories.has(path.memory_id)) {
@@ -52,7 +52,7 @@ export function boot(
   }
 
   // 3. Check system://boot for additional paths
-  const bootEntry = getPathByUri(db, "system://boot");
+  const bootEntry = getPathByUri(db, "system://boot", agentId);
   if (bootEntry) {
     const bootMem = getMemory(db, bootEntry.memory_id);
     if (bootMem) {
@@ -63,7 +63,7 @@ export function boot(
         .filter((l) => l.match(/^[a-z]+:\/\//));
 
       for (const uri of additionalUris) {
-        const path = getPathByUri(db, uri);
+        const path = getPathByUri(db, uri, agentId);
         if (path && !memories.has(path.memory_id)) {
           const mem = getMemory(db, path.memory_id);
           if (mem) {

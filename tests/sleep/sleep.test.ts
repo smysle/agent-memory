@@ -197,6 +197,29 @@ describe("Sleep Cycle", () => {
     expect(remaining.some((m) => m.type === "emotion")).toBe(true);
   });
 
+  it("scopes decay and tidy to a single agent", () => {
+    const a = createMemory(db, { content: "agent a old event", type: "event", agent_id: "agent-a" })!;
+    const b = createMemory(db, { content: "agent b old event", type: "event", agent_id: "agent-b" })!;
+
+    db.prepare("UPDATE memories SET created_at = '2025-01-01T00:00:00.000Z' WHERE id IN (?, ?)").run(a.id, b.id);
+
+    const beforeA = getMemory(db, a.id)!.vitality;
+    const beforeB = getMemory(db, b.id)!.vitality;
+
+    runDecay(db, { agent_id: "agent-a" });
+    const afterA = getMemory(db, a.id)!.vitality;
+    const afterB = getMemory(db, b.id)!.vitality;
+
+    expect(afterA).toBeLessThan(beforeA);
+    expect(afterB).toBe(beforeB);
+
+    db.prepare("UPDATE memories SET vitality = 0.01 WHERE id IN (?, ?)").run(a.id, b.id);
+    const tidyA = runTidy(db, { agent_id: "agent-a" });
+    expect(tidyA.archived).toBe(1);
+    expect(getMemory(db, a.id)).toBeNull();
+    expect(getMemory(db, b.id)).not.toBeNull();
+  });
+
   // ── Export ──
 
   it("exports memories to markdown files", () => {

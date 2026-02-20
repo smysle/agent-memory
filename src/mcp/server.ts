@@ -6,7 +6,7 @@ import { openDatabase } from "../core/db.js";
 import { createMemory, getMemory, updateMemory, listMemories, countMemories, recordAccess } from "../core/memory.js";
 import { createPath, getPathByUri, getPathsByPrefix } from "../core/path.js";
 import { createLink, getLinks, traverse } from "../core/link.js";
-import { createSnapshot, getSnapshots, rollback } from "../core/snapshot.js";
+import { createSnapshot, getSnapshot, getSnapshots, rollback } from "../core/snapshot.js";
 import { guard } from "../core/guard.js";
 import { searchBM25 } from "../search/bm25.js";
 import { classifyIntent, getStrategy } from "../search/intent.js";
@@ -96,17 +96,18 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
     },
     async ({ uri, traverse_hops }) => {
       // Try exact match first
-      const path = getPathByUri(db, uri);
+      const path = getPathByUri(db, uri, aid);
       if (path) {
         const mem = getMemory(db, path.memory_id);
-        if (mem) {
+        if (mem && mem.agent_id === aid) {
           recordAccess(db, mem.id);
           let related: Array<{ id: string; content: string; relation: string; hop: number }> = [];
           if (traverse_hops > 0) {
-            const hops = traverse(db, mem.id, traverse_hops);
+            const hops = traverse(db, mem.id, traverse_hops, aid);
             related = hops.map((h) => {
               const m = getMemory(db, h.id);
-              return { id: h.id, content: m?.content ?? "", relation: h.relation, hop: h.hop };
+              if (!m || m.agent_id !== aid) return { id: h.id, content: "", relation: h.relation, hop: h.hop };
+              return { id: h.id, content: m.content, relation: h.relation, hop: h.hop };
             });
           }
           return {
@@ -119,11 +120,12 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
       }
 
       // Try prefix search
-      const paths = getPathsByPrefix(db, uri);
+      const paths = getPathsByPrefix(db, uri, aid);
       if (paths.length > 0) {
         const memories = paths.map((p) => {
           const m = getMemory(db, p.memory_id);
-          return { uri: p.uri, content: m?.content, type: m?.type, priority: m?.priority };
+          if (!m || m.agent_id !== aid) return { uri: p.uri, content: undefined, type: undefined, priority: undefined };
+          return { uri: p.uri, content: m.content, type: m.type, priority: m.priority };
         });
         return {
           content: [{
@@ -168,7 +170,7 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
     },
     async ({ id, hard }) => {
       const mem = getMemory(db, id);
-      if (!mem) return { content: [{ type: "text" as const, text: '{"error": "Memory not found"}' }] };
+      if (!mem || mem.agent_id !== aid) return { content: [{ type: "text" as const, text: '{"error": "Memory not found"}' }] };
 
       if (hard) {
         createSnapshot(db, id, "delete", "forget");
@@ -200,18 +202,19 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
     },
     async ({ action, source_id, target_id, relation, max_hops }) => {
       if (action === "create" && source_id && target_id && relation) {
-        const link = createLink(db, source_id, target_id, relation);
+        const link = createLink(db, source_id, target_id, relation, 1.0, aid);
         return { content: [{ type: "text" as const, text: JSON.stringify({ created: link }) }] };
       }
       if (action === "query" && source_id) {
-        const links = getLinks(db, source_id);
+        const links = getLinks(db, source_id, aid);
         return { content: [{ type: "text" as const, text: JSON.stringify({ links }) }] };
       }
       if (action === "traverse" && source_id) {
-        const nodes = traverse(db, source_id, max_hops);
+        const nodes = traverse(db, source_id, max_hops, aid);
         const detailed = nodes.map((n) => {
           const m = getMemory(db, n.id);
-          return { ...n, content: m?.content };
+          if (!m || m.agent_id !== aid) return { ...n, content: undefined };
+          return { ...n, content: m.content };
         });
         return { content: [{ type: "text" as const, text: JSON.stringify({ nodes: detailed }) }] };
       }
@@ -230,10 +233,16 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
     },
     async ({ action, memory_id, snapshot_id }) => {
       if (action === "list" && memory_id) {
+        const mem = getMemory(db, memory_id);
+        if (!mem || mem.agent_id !== aid) return { content: [{ type: "text" as const, text: '{"error": "Memory not found"}' }] };
         const snaps = getSnapshots(db, memory_id);
         return { content: [{ type: "text" as const, text: JSON.stringify({ snapshots: snaps }) }] };
       }
       if (action === "rollback" && snapshot_id) {
+        const snap = getSnapshot(db, snapshot_id);
+        if (!snap) return { content: [{ type: "text" as const, text: '{"error": "Snapshot not found"}' }] };
+        const mem = getMemory(db, snap.memory_id);
+        if (!mem || mem.agent_id !== aid) return { content: [{ type: "text" as const, text: '{"error": "Snapshot not found"}' }] };
         const ok = rollback(db, snapshot_id);
         return { content: [{ type: "text" as const, text: JSON.stringify({ rolled_back: ok }) }] };
       }
@@ -252,13 +261,13 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
       const results: Record<string, unknown> = {};
 
       if (phase === "decay" || phase === "all") {
-        results.decay = runDecay(db);
+        results.decay = runDecay(db, { agent_id: aid });
       }
       if (phase === "tidy" || phase === "all") {
-        results.tidy = runTidy(db);
+        results.tidy = runTidy(db, { agent_id: aid });
       }
       if (phase === "govern" || phase === "all") {
-        results.govern = runGovern(db);
+        results.govern = runGovern(db, { agent_id: aid });
       }
 
       return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
@@ -275,9 +284,16 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
       const lowVitality = db
         .prepare("SELECT COUNT(*) as c FROM memories WHERE vitality < 0.1 AND agent_id = ?")
         .get(aid) as { c: number };
-      const totalSnapshots = db.prepare("SELECT COUNT(*) as c FROM snapshots").get() as { c: number };
-      const totalLinks = db.prepare("SELECT COUNT(*) as c FROM links").get() as { c: number };
-      const totalPaths = db.prepare("SELECT COUNT(*) as c FROM paths").get() as { c: number };
+      const totalSnapshots = db
+        .prepare(
+          `SELECT COUNT(*) as c
+           FROM snapshots s
+           JOIN memories m ON m.id = s.memory_id
+           WHERE m.agent_id = ?`,
+        )
+        .get(aid) as { c: number };
+      const totalLinks = db.prepare("SELECT COUNT(*) as c FROM links WHERE agent_id = ?").get(aid) as { c: number };
+      const totalPaths = db.prepare("SELECT COUNT(*) as c FROM paths WHERE agent_id = ?").get(aid) as { c: number };
 
       return {
         content: [{

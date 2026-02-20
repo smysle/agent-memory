@@ -24,6 +24,10 @@ function getDbPath(): string {
   return process.env.AGENT_MEMORY_DB ?? "./agent-memory.db";
 }
 
+function getAgentId(): string {
+  return process.env.AGENT_MEMORY_AGENT_ID ?? "default";
+}
+
 function printHelp() {
   console.log(`
 🧠 AgentMemory v2 — Sleep-cycle memory for AI agents
@@ -32,6 +36,7 @@ Usage: agent-memory <command> [options]
 
 Commands:
   init                          Create database
+  db:migrate                    Run schema migrations (no-op if up-to-date)
   remember <content> [--uri X] [--type T]  Store a memory
   recall <query> [--limit N]    Search memories
   boot                          Load identity memories
@@ -63,13 +68,22 @@ try {
       break;
     }
 
+    case "db:migrate": {
+      const dbPath = getDbPath();
+      const db = openDatabase({ path: dbPath });
+      const version = (db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined)?.value;
+      console.log(`✅ Schema version: ${version ?? "unknown"} (${dbPath})`);
+      db.close();
+      break;
+    }
+
     case "remember": {
       const content = args.slice(1).filter((a) => !a.startsWith("--")).join(" ");
       if (!content) { console.error("Usage: agent-memory remember <content>"); process.exit(1); }
       const db = openDatabase({ path: getDbPath() });
       const uri = getFlag("--uri");
       const type = (getFlag("--type") ?? "knowledge") as MemoryType;
-      const result = syncOne(db, { content, type, uri });
+      const result = syncOne(db, { content, type, uri, agent_id: getAgentId() });
       console.log(`${result.action}: ${result.reason}${result.memoryId ? ` (${result.memoryId.slice(0, 8)})` : ""}`);
       db.close();
       break;
@@ -82,7 +96,7 @@ try {
       const limit = parseInt(getFlag("--limit") ?? "10");
       const { intent } = classifyIntent(query);
       const strategy = getStrategy(intent);
-      const raw = searchBM25(db, query, { limit: limit * 2 });
+      const raw = searchBM25(db, query, { agent_id: getAgentId(), limit: limit * 2 });
       const results = rerank(raw, { ...strategy, limit });
 
       console.log(`🔍 Intent: ${intent} | Results: ${results.length}\n`);
@@ -97,7 +111,7 @@ try {
 
     case "boot": {
       const db = openDatabase({ path: getDbPath() });
-      const result = boot(db);
+      const result = boot(db, { agent_id: getAgentId() });
       console.log(`🧠 Boot: ${result.identityMemories.length} identity memories loaded\n`);
       for (const m of result.identityMemories) {
         console.log(`  🔴 ${m.content.slice(0, 100)}`);
@@ -111,11 +125,16 @@ try {
 
     case "status": {
       const db = openDatabase({ path: getDbPath() });
-      const stats = countMemories(db);
-      const lowVit = (db.prepare("SELECT COUNT(*) as c FROM memories WHERE vitality < 0.1").get() as { c: number }).c;
-      const paths = (db.prepare("SELECT COUNT(*) as c FROM paths").get() as { c: number }).c;
-      const links = (db.prepare("SELECT COUNT(*) as c FROM links").get() as { c: number }).c;
-      const snaps = (db.prepare("SELECT COUNT(*) as c FROM snapshots").get() as { c: number }).c;
+      const agentId = getAgentId();
+      const stats = countMemories(db, agentId);
+      const lowVit = (db.prepare("SELECT COUNT(*) as c FROM memories WHERE vitality < 0.1 AND agent_id = ?").get(agentId) as { c: number }).c;
+      const paths = (db.prepare("SELECT COUNT(*) as c FROM paths WHERE agent_id = ?").get(agentId) as { c: number }).c;
+      const links = (db.prepare("SELECT COUNT(*) as c FROM links WHERE agent_id = ?").get(agentId) as { c: number }).c;
+      const snaps = (db.prepare(
+        `SELECT COUNT(*) as c FROM snapshots s
+         JOIN memories m ON m.id = s.memory_id
+         WHERE m.agent_id = ?`,
+      ).get(agentId) as { c: number }).c;
 
       console.log("🧠 AgentMemory Status\n");
       console.log(`  Total memories: ${stats.total}`);
@@ -130,18 +149,19 @@ try {
     case "reflect": {
       const phase = args[1] ?? "all";
       const db = openDatabase({ path: getDbPath() });
+      const agentId = getAgentId();
       console.log(`🌙 Running ${phase} phase...\n`);
 
       if (phase === "decay" || phase === "all") {
-        const r = runDecay(db);
+        const r = runDecay(db, { agent_id: agentId });
         console.log(`  Decay: ${r.updated} updated, ${r.decayed} decayed, ${r.belowThreshold} below threshold`);
       }
       if (phase === "tidy" || phase === "all") {
-        const r = runTidy(db);
+        const r = runTidy(db, { agent_id: agentId });
         console.log(`  Tidy: ${r.archived} archived, ${r.orphansCleaned} orphans, ${r.snapshotsPruned} snapshots pruned`);
       }
       if (phase === "govern" || phase === "all") {
-        const r = runGovern(db);
+        const r = runGovern(db, { agent_id: agentId });
         console.log(`  Govern: ${r.orphanPaths} paths, ${r.orphanLinks} links, ${r.emptyMemories} empty cleaned`);
       }
       db.close();
@@ -176,7 +196,7 @@ try {
       const dirPath = resolve(dir);
 
       const db = openDatabase({ path: getDbPath() });
-      const agentId = process.env.AGENT_MEMORY_AGENT_ID ?? "default";
+      const agentId = getAgentId();
       const result = exportMemories(db, dirPath, { agent_id: agentId });
       console.log(`✅ Export complete: ${result.exported} items to ${dirPath} (${result.files.length} files)`);
       db.close();
@@ -190,6 +210,7 @@ try {
       if (!existsSync(dirPath)) { console.error(`Directory not found: ${dirPath}`); process.exit(1); }
 
       const db = openDatabase({ path: getDbPath() });
+      const agentId = getAgentId();
       let imported = 0;
 
       // Check for MEMORY.md
@@ -208,7 +229,7 @@ try {
             ? "identity" : "knowledge";
           const uri = `knowledge://memory-md/${title?.replace(/[^a-z0-9\u4e00-\u9fff]/gi, "-").toLowerCase()}`;
 
-          syncOne(db, { content: `## ${title}\n${body}`, type, uri, source: "migrate:MEMORY.md" });
+          syncOne(db, { content: `## ${title}\n${body}`, type, uri, source: "migrate:MEMORY.md", agent_id: agentId });
           imported++;
         }
         console.log(`📄 MEMORY.md: ${sections.length} sections imported`);
@@ -224,6 +245,7 @@ try {
           type: "event",
           uri: `event://journal/${date}`,
           source: `migrate:${file}`,
+          agent_id: agentId,
         });
         imported++;
       }
@@ -241,6 +263,7 @@ try {
             type: "knowledge",
             uri: `knowledge://weekly/${week}`,
             source: `migrate:weekly/${file}`,
+            agent_id: agentId,
           });
           imported++;
         }

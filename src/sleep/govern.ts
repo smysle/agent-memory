@@ -13,32 +13,43 @@ export interface GovernResult {
  * 2. Remove orphan links (source or target missing)
  * 3. Remove empty memories (blank content)
  */
-export function runGovern(db: Database.Database): GovernResult {
+export function runGovern(db: Database.Database, opts?: { agent_id?: string }): GovernResult {
+  const agentId = opts?.agent_id;
   let orphanPaths = 0;
   let orphanLinks = 0;
   let emptyMemories = 0;
 
   const transaction = db.transaction(() => {
     // 1. Orphan paths
-    const pathResult = db
-      .prepare("DELETE FROM paths WHERE memory_id NOT IN (SELECT id FROM memories)")
-      .run();
+    const pathResult = agentId
+      ? db.prepare(
+        `DELETE FROM paths
+         WHERE agent_id = ?
+           AND memory_id NOT IN (SELECT id FROM memories WHERE agent_id = ?)`,
+      ).run(agentId, agentId)
+      : db.prepare("DELETE FROM paths WHERE memory_id NOT IN (SELECT id FROM memories)").run();
     orphanPaths = pathResult.changes;
 
     // 2. Orphan links
-    const linkResult = db
-      .prepare(
+    const linkResult = agentId
+      ? db.prepare(
+        `DELETE FROM links WHERE
+         agent_id = ? AND (
+           source_id NOT IN (SELECT id FROM memories WHERE agent_id = ?) OR
+           target_id NOT IN (SELECT id FROM memories WHERE agent_id = ?)
+         )`,
+      ).run(agentId, agentId, agentId)
+      : db.prepare(
         `DELETE FROM links WHERE
          source_id NOT IN (SELECT id FROM memories) OR
          target_id NOT IN (SELECT id FROM memories)`,
-      )
-      .run();
+      ).run();
     orphanLinks = linkResult.changes;
 
     // 3. Empty memories
-    const emptyResult = db
-      .prepare("DELETE FROM memories WHERE TRIM(content) = ''")
-      .run();
+    const emptyResult = agentId
+      ? db.prepare("DELETE FROM memories WHERE agent_id = ? AND TRIM(content) = ''").run(agentId)
+      : db.prepare("DELETE FROM memories WHERE TRIM(content) = ''").run();
     emptyMemories = emptyResult.changes;
   });
 

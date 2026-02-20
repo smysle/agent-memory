@@ -55,20 +55,26 @@ export function calculateVitality(
  * Updates vitality based on Ebbinghaus curve.
  * Returns count of memories updated.
  */
-export function runDecay(db: Database.Database): {
+export function runDecay(
+  db: Database.Database,
+  opts?: { agent_id?: string },
+): {
   updated: number;
   decayed: number;
   belowThreshold: number;
 } {
   const currentTime = now();
   const currentMs = new Date(currentTime).getTime();
+  const agentId = opts?.agent_id;
 
   // Get all non-P0 memories, including last_accessed for proper decay timing
+  const query = agentId
+    ? "SELECT id, priority, stability, created_at, last_accessed, vitality FROM memories WHERE priority > 0 AND agent_id = ?"
+    : "SELECT id, priority, stability, created_at, last_accessed, vitality FROM memories WHERE priority > 0";
+
   const memories = db
-    .prepare(
-      "SELECT id, priority, stability, created_at, last_accessed, vitality FROM memories WHERE priority > 0",
-    )
-    .all() as Array<{
+    .prepare(query)
+    .all(...(agentId ? [agentId] : [])) as Array<{
     id: string;
     priority: number;
     stability: number;
@@ -121,14 +127,20 @@ export function runDecay(db: Database.Database): {
 export function getDecayedMemories(
   db: Database.Database,
   threshold = 0.05,
+  opts?: { agent_id?: string },
 ): Array<{ id: string; content: string; vitality: number; priority: number }> {
+  const agentId = opts?.agent_id;
   return db
     .prepare(
-      `SELECT id, content, vitality, priority FROM memories
-       WHERE vitality < ? AND priority >= 3
-       ORDER BY vitality ASC`,
+      agentId
+        ? `SELECT id, content, vitality, priority FROM memories
+           WHERE vitality < ? AND priority >= 3 AND agent_id = ?
+           ORDER BY vitality ASC`
+        : `SELECT id, content, vitality, priority FROM memories
+           WHERE vitality < ? AND priority >= 3
+           ORDER BY vitality ASC`,
     )
-    .all(threshold) as Array<{
+    .all(...(agentId ? [threshold, agentId] : [threshold])) as Array<{
     id: string;
     content: string;
     vitality: number;
