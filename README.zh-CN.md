@@ -36,8 +36,8 @@ AI Agent 每次会话都会遗忘一切。上下文窗口有限，对话历史�
 | 🕸️ **知识图谱** | 记忆关联的多跳遍历 | PowerMem |
 | 📸 **快照系统** | 每次修改前自动快照，一键回滚 | nocturne + Memory Palace |
 | 🔍 **意图感知搜索** | 事实型/时间型/因果型/探索型查询路由 | Memory Palace |
-| 🌙 **睡眠周期** | 自动化 sync → decay → tidy → govern 流水线 | **我们的原创设计** |
-| 💚 **优先级系统** | P0 身份（永不衰减）→ P3 事件（14天半衰期） | **我们的原创设计** |
+| 🌙 **睡眠周期** | 自动化 sync → decay → tidy → govern 流水线 | - |
+| 💚 **优先级系统** | P0 身份（永不衰减）→ P3 事件（14天半衰期） | - |
 | 🤝 **多 Agent** | 通过 `agent_id` 实现记忆隔离 | PowerMem |
 | 🔌 **MCP Server** | 9 个工具，支持 Claude Code / Cursor / OpenClaw | 标准 MCP |
 
