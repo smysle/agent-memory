@@ -28,3 +28,7 @@ export { rerank } from "./search/rerank.js";
 
 // Sleep
 export { calculateVitality, runDecay, getDecayedMemories } from "./sleep/decay.js";
+export { syncOne, syncBatch, type SyncInput, type SyncResult } from "./sleep/sync.js";
+export { runTidy, type TidyResult } from "./sleep/tidy.js";
+export { runGovern, type GovernResult } from "./sleep/govern.js";
+export { boot, type BootResult } from "./sleep/boot.js";
