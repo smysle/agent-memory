@@ -1,10 +1,5 @@
+export { D as DbOptions, o as openDatabase } from './db-CMsKtBt0.js';
 import Database from 'better-sqlite3';
-
-interface DbOptions {
-    path: string;
-    walMode?: boolean;
-}
-declare function openDatabase(opts: DbOptions): Database.Database;
 
 type MemoryType = "identity" | "emotion" | "knowledge" | "event";
 type Priority = 0 | 1 | 2 | 3;
@@ -145,4 +140,136 @@ declare function guard(db: Database.Database, input: CreateMemoryInput & {
     uri?: string;
 }): GuardResult;
 
-export { type CreateMemoryInput, type DbOptions, type GuardAction, type GuardResult, type Link, type Memory, type MemoryType, type Path, type Priority, type RelationType, type Snapshot, type SnapshotAction, type UpdateMemoryInput, contentHash, countMemories, createLink, createMemory, createPath, createSnapshot, deleteLink, deleteMemory, deletePath, getLinks, getMemory, getOutgoingLinks, getPath, getPathByUri, getPathsByDomain, getPathsByMemory, getPathsByPrefix, getSnapshot, getSnapshots, guard, listMemories, openDatabase, parseUri, recordAccess, rollback, traverse, updateMemory };
+interface SearchResult {
+    memory: Memory;
+    score: number;
+    matchReason: string;
+}
+/**
+ * BM25 search using SQLite FTS5.
+ * Returns memories ranked by relevance.
+ */
+declare function searchBM25(db: Database.Database, query: string, opts?: {
+    agent_id?: string;
+    limit?: number;
+    min_vitality?: number;
+}): SearchResult[];
+
+type SearchIntent = "factual" | "exploratory" | "temporal" | "causal";
+interface IntentResult {
+    intent: SearchIntent;
+    confidence: number;
+}
+/**
+ * Classify the intent of a search query.
+ * Uses keyword scoring — no LLM needed.
+ */
+declare function classifyIntent(query: string): IntentResult;
+/**
+ * Get search strategy based on intent
+ */
+declare function getStrategy(intent: SearchIntent): {
+    boostRecent: boolean;
+    boostPriority: boolean;
+    limit: number;
+};
+
+/**
+ * Rerank search results based on intent strategy and priority weighting.
+ */
+declare function rerank(results: SearchResult[], opts: {
+    intent?: SearchIntent;
+    boostRecent: boolean;
+    boostPriority: boolean;
+    limit: number;
+}): SearchResult[];
+
+declare function calculateVitality(stability: number, daysSinceCreation: number, priority: number): number;
+/**
+ * Run decay on all memories.
+ * Updates vitality based on Ebbinghaus curve.
+ * Returns count of memories updated.
+ */
+declare function runDecay(db: Database.Database): {
+    updated: number;
+    decayed: number;
+    belowThreshold: number;
+};
+/**
+ * Get memories that are candidates for cleanup (vitality < threshold).
+ * Only P3 (event) memories can be fully cleaned.
+ */
+declare function getDecayedMemories(db: Database.Database, threshold?: number): Array<{
+    id: string;
+    content: string;
+    vitality: number;
+    priority: number;
+}>;
+
+interface SyncInput {
+    content: string;
+    type?: CreateMemoryInput["type"];
+    priority?: CreateMemoryInput["priority"];
+    emotion_val?: number;
+    uri?: string;
+    source?: string;
+    agent_id?: string;
+}
+interface SyncResult {
+    action: "added" | "updated" | "merged" | "skipped";
+    memoryId?: string;
+    reason: string;
+}
+/**
+ * Sync a single piece of information into memory.
+ * Runs full Write Guard pipeline before writing.
+ */
+declare function syncOne(db: Database.Database, input: SyncInput): SyncResult;
+/**
+ * Sync multiple items in a batch (within a transaction).
+ */
+declare function syncBatch(db: Database.Database, inputs: SyncInput[]): SyncResult[];
+
+interface TidyResult {
+    archived: number;
+    orphansCleaned: number;
+    snapshotsPruned: number;
+}
+/**
+ * Run the tidy (deep sleep) cycle:
+ * 1. Archive decayed P3 memories (vitality < threshold)
+ * 2. Clean orphan paths (paths with no memory)
+ * 3. Prune old snapshots (keep last N per memory)
+ */
+declare function runTidy(db: Database.Database, opts?: {
+    vitalityThreshold?: number;
+    maxSnapshotsPerMemory?: number;
+}): TidyResult;
+
+interface GovernResult {
+    orphanPaths: number;
+    orphanLinks: number;
+    emptyMemories: number;
+}
+/**
+ * Run governance checks and cleanup:
+ * 1. Remove orphan paths (no parent memory)
+ * 2. Remove orphan links (source or target missing)
+ * 3. Remove empty memories (blank content)
+ */
+declare function runGovern(db: Database.Database): GovernResult;
+
+interface BootResult {
+    identityMemories: Memory[];
+    bootPaths: string[];
+}
+/**
+ * Load core identity memories at startup.
+ * Returns all P0 (identity) memories + any memories referenced by system://boot.
+ */
+declare function boot(db: Database.Database, opts?: {
+    agent_id?: string;
+    corePaths?: string[];
+}): BootResult;
+
+export { type BootResult, type CreateMemoryInput, type GovernResult, type GuardAction, type GuardResult, type IntentResult, type Link, type Memory, type MemoryType, type Path, type Priority, type RelationType, type SearchIntent, type SearchResult, type Snapshot, type SnapshotAction, type SyncInput, type SyncResult, type TidyResult, type UpdateMemoryInput, boot, calculateVitality, classifyIntent, contentHash, countMemories, createLink, createMemory, createPath, createSnapshot, deleteLink, deleteMemory, deletePath, getDecayedMemories, getLinks, getMemory, getOutgoingLinks, getPath, getPathByUri, getPathsByDomain, getPathsByMemory, getPathsByPrefix, getSnapshot, getSnapshots, getStrategy, guard, listMemories, parseUri, recordAccess, rerank, rollback, runDecay, runGovern, runTidy, searchBM25, syncBatch, syncOne, traverse, updateMemory };

@@ -436,7 +436,379 @@ function escapeFts(text) {
   if (words.length === 0) return '""';
   return words.map((w) => `"${w}"`).join(" OR ");
 }
+
+// src/search/bm25.ts
+function searchBM25(db, query, opts) {
+  const limit = opts?.limit ?? 20;
+  const agentId = opts?.agent_id ?? "default";
+  const minVitality = opts?.min_vitality ?? 0;
+  const ftsQuery = buildFtsQuery(query);
+  if (!ftsQuery) return [];
+  try {
+    const rows = db.prepare(
+      `SELECT m.*, rank AS score
+         FROM memories_fts f
+         JOIN memories m ON m.id = f.id
+         WHERE memories_fts MATCH ?
+           AND m.agent_id = ?
+           AND m.vitality >= ?
+         ORDER BY rank
+         LIMIT ?`
+    ).all(ftsQuery, agentId, minVitality, limit);
+    return rows.map((row) => ({
+      memory: { ...row, score: void 0 },
+      score: Math.abs(row.score),
+      // FTS5 rank is negative (lower = better)
+      matchReason: "bm25"
+    }));
+  } catch {
+    return searchSimple(db, query, agentId, minVitality, limit);
+  }
+}
+function searchSimple(db, query, agentId, minVitality, limit) {
+  const rows = db.prepare(
+    `SELECT * FROM memories
+       WHERE agent_id = ? AND vitality >= ? AND content LIKE ?
+       ORDER BY priority ASC, updated_at DESC
+       LIMIT ?`
+  ).all(agentId, minVitality, `%${query}%`, limit);
+  return rows.map((m, i) => ({
+    memory: m,
+    score: 1 / (i + 1),
+    // Simple rank by position
+    matchReason: "like"
+  }));
+}
+function buildFtsQuery(text) {
+  const words = text.replace(/[^\w\u4e00-\u9fff\u3040-\u30ff\s]/g, " ").split(/\s+/).filter((w) => w.length > 1).slice(0, 10);
+  if (words.length === 0) return null;
+  return words.map((w) => `"${w}"`).join(" OR ");
+}
+
+// src/search/intent.ts
+var INTENT_PATTERNS = {
+  factual: [
+    /^(what|who|where|which|how much|how many)/i,
+    /是(什么|谁|哪)/,
+    /叫什么/,
+    /名字/,
+    /地址/,
+    /号码/,
+    /密码/,
+    /配置/,
+    /设置/
+  ],
+  temporal: [
+    /^(when|what time|how long)/i,
+    /(yesterday|today|last week|recently|ago|before|after)/i,
+    /什么时候/,
+    /(昨天|今天|上周|最近|以前|之前|之后)/,
+    /\d{4}[-/]\d{1,2}/,
+    /(几月|几号|几点)/
+  ],
+  causal: [
+    /^(why|how come|what caused)/i,
+    /^(because|due to|reason)/i,
+    /为什么/,
+    /原因/,
+    /导致/,
+    /怎么回事/,
+    /为啥/
+  ],
+  exploratory: [
+    /^(how|tell me about|explain|describe)/i,
+    /^(what do you think|what about)/i,
+    /怎么样/,
+    /介绍/,
+    /说说/,
+    /讲讲/,
+    /有哪些/,
+    /关于/
+  ]
+};
+function classifyIntent(query) {
+  const scores = {
+    factual: 0,
+    exploratory: 0,
+    temporal: 0,
+    causal: 0
+  };
+  for (const [intent, patterns] of Object.entries(INTENT_PATTERNS)) {
+    for (const pattern of patterns) {
+      if (pattern.test(query)) {
+        scores[intent] += 1;
+      }
+    }
+  }
+  let maxIntent = "factual";
+  let maxScore = 0;
+  for (const [intent, score] of Object.entries(scores)) {
+    if (score > maxScore) {
+      maxScore = score;
+      maxIntent = intent;
+    }
+  }
+  const totalScore = Object.values(scores).reduce((a, b) => a + b, 0);
+  const confidence = totalScore > 0 ? maxScore / totalScore : 0.5;
+  return { intent: maxIntent, confidence };
+}
+function getStrategy(intent) {
+  switch (intent) {
+    case "factual":
+      return { boostRecent: false, boostPriority: true, limit: 5 };
+    case "temporal":
+      return { boostRecent: true, boostPriority: false, limit: 10 };
+    case "causal":
+      return { boostRecent: false, boostPriority: false, limit: 10 };
+    case "exploratory":
+      return { boostRecent: false, boostPriority: false, limit: 15 };
+  }
+}
+
+// src/search/rerank.ts
+function rerank(results, opts) {
+  const now2 = Date.now();
+  const scored = results.map((r) => {
+    let finalScore = r.score;
+    if (opts.boostPriority) {
+      const priorityMultiplier = [4, 3, 2, 1][r.memory.priority] ?? 1;
+      finalScore *= priorityMultiplier;
+    }
+    if (opts.boostRecent && r.memory.updated_at) {
+      const age = now2 - new Date(r.memory.updated_at).getTime();
+      const daysSinceUpdate = age / (1e3 * 60 * 60 * 24);
+      const recencyBoost = Math.max(0.1, 1 / (1 + daysSinceUpdate * 0.1));
+      finalScore *= recencyBoost;
+    }
+    finalScore *= Math.max(0.1, r.memory.vitality);
+    return { ...r, score: finalScore };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, opts.limit);
+}
+
+// src/sleep/decay.ts
+var MIN_VITALITY = {
+  0: 1,
+  // P0: identity — never decays
+  1: 0.3,
+  // P1: emotion — slow decay
+  2: 0.1,
+  // P2: knowledge — normal decay
+  3: 0
+  // P3: event — full decay
+};
+function calculateVitality(stability, daysSinceCreation, priority) {
+  if (priority === 0) return 1;
+  const S = Math.max(0.01, stability);
+  const retention = Math.exp(-daysSinceCreation / S);
+  const minVit = MIN_VITALITY[priority] ?? 0;
+  return Math.max(minVit, retention);
+}
+function runDecay(db) {
+  const currentTime = now();
+  const currentMs = new Date(currentTime).getTime();
+  const memories = db.prepare("SELECT id, priority, stability, created_at, vitality FROM memories WHERE priority > 0").all();
+  let updated = 0;
+  let decayed = 0;
+  let belowThreshold = 0;
+  const updateStmt = db.prepare("UPDATE memories SET vitality = ?, updated_at = ? WHERE id = ?");
+  const transaction = db.transaction(() => {
+    for (const mem of memories) {
+      const createdMs = new Date(mem.created_at).getTime();
+      const daysSince = (currentMs - createdMs) / (1e3 * 60 * 60 * 24);
+      const newVitality = calculateVitality(mem.stability, daysSince, mem.priority);
+      if (Math.abs(newVitality - mem.vitality) > 1e-3) {
+        updateStmt.run(newVitality, currentTime, mem.id);
+        updated++;
+        if (newVitality < mem.vitality) {
+          decayed++;
+        }
+        if (newVitality < 0.05) {
+          belowThreshold++;
+        }
+      }
+    }
+  });
+  transaction();
+  return { updated, decayed, belowThreshold };
+}
+function getDecayedMemories(db, threshold = 0.05) {
+  return db.prepare(
+    `SELECT id, content, vitality, priority FROM memories
+       WHERE vitality < ? AND priority >= 3
+       ORDER BY vitality ASC`
+  ).all(threshold);
+}
+
+// src/sleep/sync.ts
+function syncOne(db, input) {
+  const memInput = {
+    content: input.content,
+    type: input.type ?? "event",
+    priority: input.priority,
+    emotion_val: input.emotion_val,
+    source: input.source,
+    agent_id: input.agent_id,
+    uri: input.uri
+  };
+  const guardResult = guard(db, memInput);
+  switch (guardResult.action) {
+    case "skip":
+      return { action: "skipped", reason: guardResult.reason, memoryId: guardResult.existingId };
+    case "add": {
+      const mem = createMemory(db, memInput);
+      if (!mem) return { action: "skipped", reason: "createMemory returned null" };
+      if (input.uri) {
+        try {
+          createPath(db, mem.id, input.uri);
+        } catch {
+        }
+      }
+      return { action: "added", memoryId: mem.id, reason: guardResult.reason };
+    }
+    case "update": {
+      if (!guardResult.existingId) return { action: "skipped", reason: "No existing ID for update" };
+      createSnapshot(db, guardResult.existingId, "update", "sync");
+      updateMemory(db, guardResult.existingId, { content: input.content });
+      return { action: "updated", memoryId: guardResult.existingId, reason: guardResult.reason };
+    }
+    case "merge": {
+      if (!guardResult.existingId || !guardResult.mergedContent) {
+        return { action: "skipped", reason: "Missing merge data" };
+      }
+      createSnapshot(db, guardResult.existingId, "merge", "sync");
+      updateMemory(db, guardResult.existingId, { content: guardResult.mergedContent });
+      return { action: "merged", memoryId: guardResult.existingId, reason: guardResult.reason };
+    }
+  }
+}
+function syncBatch(db, inputs) {
+  const results = [];
+  const transaction = db.transaction(() => {
+    for (const input of inputs) {
+      results.push(syncOne(db, input));
+    }
+  });
+  transaction();
+  return results;
+}
+
+// src/sleep/tidy.ts
+function runTidy(db, opts) {
+  const threshold = opts?.vitalityThreshold ?? 0.05;
+  const maxSnapshots = opts?.maxSnapshotsPerMemory ?? 10;
+  let archived = 0;
+  let orphansCleaned = 0;
+  let snapshotsPruned = 0;
+  const transaction = db.transaction(() => {
+    const decayed = getDecayedMemories(db, threshold);
+    for (const mem of decayed) {
+      try {
+        createSnapshot(db, mem.id, "delete", "tidy");
+      } catch {
+      }
+      deleteMemory(db, mem.id);
+      archived++;
+    }
+    const orphans = db.prepare(
+      `DELETE FROM paths WHERE memory_id NOT IN (SELECT id FROM memories)`
+    ).run();
+    orphansCleaned = orphans.changes;
+    const memoriesWithSnapshots = db.prepare(
+      `SELECT memory_id, COUNT(*) as cnt FROM snapshots
+         GROUP BY memory_id HAVING cnt > ?`
+    ).all(maxSnapshots);
+    for (const { memory_id } of memoriesWithSnapshots) {
+      const pruned = db.prepare(
+        `DELETE FROM snapshots WHERE id NOT IN (
+            SELECT id FROM snapshots WHERE memory_id = ?
+            ORDER BY created_at DESC LIMIT ?
+          ) AND memory_id = ?`
+      ).run(memory_id, maxSnapshots, memory_id);
+      snapshotsPruned += pruned.changes;
+    }
+  });
+  transaction();
+  return { archived, orphansCleaned, snapshotsPruned };
+}
+
+// src/sleep/govern.ts
+function runGovern(db) {
+  let orphanPaths = 0;
+  let orphanLinks = 0;
+  let emptyMemories = 0;
+  const transaction = db.transaction(() => {
+    const pathResult = db.prepare("DELETE FROM paths WHERE memory_id NOT IN (SELECT id FROM memories)").run();
+    orphanPaths = pathResult.changes;
+    const linkResult = db.prepare(
+      `DELETE FROM links WHERE
+         source_id NOT IN (SELECT id FROM memories) OR
+         target_id NOT IN (SELECT id FROM memories)`
+    ).run();
+    orphanLinks = linkResult.changes;
+    const emptyResult = db.prepare("DELETE FROM memories WHERE TRIM(content) = ''").run();
+    emptyMemories = emptyResult.changes;
+  });
+  transaction();
+  return { orphanPaths, orphanLinks, emptyMemories };
+}
+
+// src/sleep/boot.ts
+function boot(db, opts) {
+  const agentId = opts?.agent_id ?? "default";
+  const corePaths = opts?.corePaths ?? [
+    "core://agent",
+    "core://user",
+    "core://agent/identity",
+    "core://user/identity"
+  ];
+  const memories = /* @__PURE__ */ new Map();
+  const identities = listMemories(db, { agent_id: agentId, priority: 0 });
+  for (const mem of identities) {
+    memories.set(mem.id, mem);
+    recordAccess(db, mem.id, 1.1);
+  }
+  const bootPaths = [];
+  for (const uri of corePaths) {
+    const path = getPathByUri(db, uri);
+    if (path) {
+      bootPaths.push(uri);
+      if (!memories.has(path.memory_id)) {
+        const mem = getMemory(db, path.memory_id);
+        if (mem) {
+          memories.set(mem.id, mem);
+          recordAccess(db, mem.id, 1.1);
+        }
+      }
+    }
+  }
+  const bootEntry = getPathByUri(db, "system://boot");
+  if (bootEntry) {
+    const bootMem = getMemory(db, bootEntry.memory_id);
+    if (bootMem) {
+      const additionalUris = bootMem.content.split("\n").map((l) => l.trim()).filter((l) => l.match(/^[a-z]+:\/\//));
+      for (const uri of additionalUris) {
+        const path = getPathByUri(db, uri);
+        if (path && !memories.has(path.memory_id)) {
+          const mem = getMemory(db, path.memory_id);
+          if (mem) {
+            memories.set(mem.id, mem);
+            bootPaths.push(uri);
+          }
+        }
+      }
+    }
+  }
+  return {
+    identityMemories: [...memories.values()],
+    bootPaths
+  };
+}
 export {
+  boot,
+  calculateVitality,
+  classifyIntent,
   contentHash,
   countMemories,
   createLink,
@@ -446,6 +818,7 @@ export {
   deleteLink,
   deleteMemory,
   deletePath,
+  getDecayedMemories,
   getLinks,
   getMemory,
   getOutgoingLinks,
@@ -456,12 +829,20 @@ export {
   getPathsByPrefix,
   getSnapshot,
   getSnapshots,
+  getStrategy,
   guard,
   listMemories,
   openDatabase,
   parseUri,
   recordAccess,
+  rerank,
   rollback,
+  runDecay,
+  runGovern,
+  runTidy,
+  searchBM25,
+  syncBatch,
+  syncOne,
   traverse,
   updateMemory
 };

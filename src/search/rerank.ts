@@ -8,7 +8,7 @@ import type { SearchIntent } from "./intent.js";
 export function rerank(
   results: SearchResult[],
   opts: {
-    intent: SearchIntent;
+    intent?: SearchIntent;
     boostRecent: boolean;
     boostPriority: boolean;
     limit: number;
