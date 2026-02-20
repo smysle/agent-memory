@@ -109,6 +109,11 @@ describe("Schema migration", () => {
 
     const db = openDatabase({ path: TEST_DB });
 
+    const version = (db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined)?.value;
+    expect(version).toBe("3");
+    const embeddingsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='embeddings'").get() as { name: string } | undefined;
+    expect(Boolean(embeddingsTable?.name)).toBe(true);
+
     const cols = db.prepare("PRAGMA table_info(paths)").all() as Array<{ name: string }>;
     expect(cols.some((c) => c.name === "agent_id")).toBe(true);
 

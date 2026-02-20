@@ -8,9 +8,11 @@ import { createPath, getPathByUri, getPathsByPrefix } from "../core/path.js";
 import { createLink, getLinks, traverse } from "../core/link.js";
 import { createSnapshot, getSnapshot, getSnapshots, rollback } from "../core/snapshot.js";
 import { guard } from "../core/guard.js";
-import { searchBM25 } from "../search/bm25.js";
 import { classifyIntent, getStrategy } from "../search/intent.js";
 import { rerank } from "../search/rerank.js";
+import { searchHybrid } from "../search/hybrid.js";
+import { getEmbeddingProviderFromEnv } from "../search/providers.js";
+import { embedMemory } from "../search/embed.js";
 import { syncOne } from "../sleep/sync.js";
 import { runDecay } from "../sleep/decay.js";
 import { runTidy } from "../sleep/tidy.js";
@@ -23,10 +25,11 @@ const AGENT_ID = process.env.AGENT_MEMORY_AGENT_ID ?? "default";
 export function createMcpServer(dbPath?: string, agentId?: string): { server: McpServer; db: ReturnType<typeof openDatabase> } {
   const db = openDatabase({ path: dbPath ?? DB_PATH });
   const aid = agentId ?? AGENT_ID;
+  const embeddingProvider = getEmbeddingProviderFromEnv();
 
   const server = new McpServer({
     name: "agent-memory",
-    version: "2.0.0",
+    version: "2.1.0",
   });
 
   // ── Tool 1: remember ──
@@ -42,6 +45,13 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
     },
     async ({ content, type, uri, emotion_val, source }) => {
       const result = syncOne(db, { content, type, uri, emotion_val, source, agent_id: aid });
+      if (embeddingProvider && result.memoryId && (result.action === "added" || result.action === "updated" || result.action === "merged")) {
+        try {
+          await embedMemory(db, result.memoryId, embeddingProvider, { agent_id: aid });
+        } catch {
+          // best-effort
+        }
+      }
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
@@ -59,7 +69,7 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
     async ({ query, limit }) => {
       const { intent, confidence } = classifyIntent(query);
       const strategy = getStrategy(intent);
-      const raw = searchBM25(db, query, { agent_id: aid, limit: limit * 2 });
+      const raw = await searchHybrid(db, query, { agent_id: aid, embeddingProvider, limit: limit * 2 });
       const results = rerank(raw, { ...strategy, limit });
 
       const output = {

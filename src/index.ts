@@ -27,6 +27,10 @@ export { searchBM25, type SearchResult } from "./search/bm25.js";
 export { tokenize } from "./search/tokenizer.js";
 export { classifyIntent, getStrategy, type SearchIntent, type IntentResult } from "./search/intent.js";
 export { rerank } from "./search/rerank.js";
+export { searchHybrid, type HybridSearchOptions } from "./search/hybrid.js";
+export { upsertEmbedding, getEmbedding, listEmbeddings, encodeEmbedding, decodeEmbedding, type StoredEmbedding } from "./search/embeddings.js";
+export { getEmbeddingProviderFromEnv, createOpenAIProvider, createDashScopeProvider, type EmbeddingProvider } from "./search/providers.js";
+export { embedMemory, embedMissingForAgent } from "./search/embed.js";
 
 // Sleep
 export { calculateVitality, runDecay, getDecayedMemories } from "./sleep/decay.js";

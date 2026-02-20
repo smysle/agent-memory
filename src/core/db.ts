@@ -2,7 +2,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const SCHEMA_SQL = `
 -- Memory entries
@@ -62,6 +62,18 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
   id UNINDEXED,
   content,
   tokenize='unicode61'
+);
+
+-- Embeddings (optional semantic layer)
+CREATE TABLE IF NOT EXISTS embeddings (
+  agent_id    TEXT NOT NULL DEFAULT 'default',
+  memory_id   TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  model       TEXT NOT NULL,
+  dim         INTEGER NOT NULL,
+  vector      BLOB NOT NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  PRIMARY KEY (agent_id, memory_id, model)
 );
 
 -- Schema version tracking
@@ -157,6 +169,11 @@ function migrateDatabase(db: Database.Database, from: number, to: number): void 
     if (v === 1) {
       migrateV1ToV2(db);
       v = 2;
+      continue;
+    }
+    if (v === 2) {
+      migrateV2ToV3(db);
+      v = 3;
       continue;
     }
     throw new Error(`Unsupported schema migration path: v${from} → v${to} (stuck at v${v})`);
@@ -258,6 +275,15 @@ function inferSchemaVersion(db: Database.Database): number {
   // Best-effort inference for databases created without schema_meta.
   const hasAgentScopedPaths = tableHasColumn(db, "paths", "agent_id");
   const hasAgentScopedLinks = tableHasColumn(db, "links", "agent_id");
+  const hasEmbeddings = (() => {
+    try {
+      const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='embeddings'").get() as { name: string } | undefined;
+      return Boolean(row);
+    } catch {
+      return false;
+    }
+  })();
+  if (hasAgentScopedPaths && hasAgentScopedLinks && hasEmbeddings) return 3;
   if (hasAgentScopedPaths && hasAgentScopedLinks) return 2;
   return 1;
 }
@@ -270,5 +296,39 @@ function ensureIndexes(db: Database.Database): void {
   if (tableHasColumn(db, "links", "agent_id")) {
     db.exec("CREATE INDEX IF NOT EXISTS idx_links_agent_source ON links(agent_id, source_id);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_links_agent_target ON links(agent_id, target_id);");
+  }
+  try {
+    const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='embeddings'").get() as { name: string } | undefined;
+    if (row) {
+      db.exec("CREATE INDEX IF NOT EXISTS idx_embeddings_agent_model ON embeddings(agent_id, model);");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_embeddings_memory ON embeddings(memory_id);");
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function migrateV2ToV3(db: Database.Database): void {
+  // v3 introduces embeddings table for optional semantic search.
+  // Safe additive migration.
+  try {
+    db.exec("BEGIN");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS embeddings (
+        agent_id    TEXT NOT NULL DEFAULT 'default',
+        memory_id   TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        model       TEXT NOT NULL,
+        dim         INTEGER NOT NULL,
+        vector      BLOB NOT NULL,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL,
+        PRIMARY KEY (agent_id, memory_id, model)
+      );
+    `);
+    db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'version'").run(String(3));
+    db.exec("COMMIT");
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw e;
   }
 }

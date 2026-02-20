@@ -4,10 +4,12 @@ import { openDatabase } from "../core/db.js";
 import { createMemory, countMemories, listMemories } from "../core/memory.js";
 import { exportMemories } from "../core/export.js";
 import { createPath } from "../core/path.js";
-import { searchBM25 } from "../search/bm25.js";
 import { tokenizeForIndex } from "../search/tokenizer.js";
 import { classifyIntent, getStrategy } from "../search/intent.js";
 import { rerank } from "../search/rerank.js";
+import { searchHybrid } from "../search/hybrid.js";
+import { getEmbeddingProviderFromEnv } from "../search/providers.js";
+import { embedMemory, embedMissingForAgent } from "../search/embed.js";
 import { boot } from "../sleep/boot.js";
 import { runDecay } from "../sleep/decay.js";
 import { runTidy } from "../sleep/tidy.js";
@@ -37,6 +39,7 @@ Usage: agent-memory <command> [options]
 Commands:
   init                          Create database
   db:migrate                    Run schema migrations (no-op if up-to-date)
+  embed [--limit N]             Embed missing memories (requires provider)
   remember <content> [--uri X] [--type T]  Store a memory
   recall <query> [--limit N]    Search memories
   boot                          Load identity memories
@@ -59,8 +62,9 @@ function getFlag(flag: string): string | undefined {
   return undefined;
 }
 
-try {
-  switch (command) {
+async function main() {
+  try {
+    switch (command) {
     case "init": {
       const dbPath = getDbPath();
       openDatabase({ path: dbPath });
@@ -77,13 +81,37 @@ try {
       break;
     }
 
+    case "embed": {
+      const provider = getEmbeddingProviderFromEnv();
+      if (!provider) {
+        console.error("Embedding provider not configured. Set AGENT_MEMORY_EMBEDDINGS_PROVIDER=openai|qwen and the corresponding API key.");
+        process.exit(1);
+      }
+      const db = openDatabase({ path: getDbPath() });
+      const agentId = getAgentId();
+      const limit = parseInt(getFlag("--limit") ?? "200");
+      const r = await embedMissingForAgent(db, provider, { agent_id: agentId, limit });
+      console.log(`✅ Embedded: ${r.embedded}/${r.scanned} (agent_id=${agentId}, model=${provider.model})`);
+      db.close();
+      break;
+    }
+
     case "remember": {
       const content = args.slice(1).filter((a) => !a.startsWith("--")).join(" ");
       if (!content) { console.error("Usage: agent-memory remember <content>"); process.exit(1); }
       const db = openDatabase({ path: getDbPath() });
       const uri = getFlag("--uri");
       const type = (getFlag("--type") ?? "knowledge") as MemoryType;
-      const result = syncOne(db, { content, type, uri, agent_id: getAgentId() });
+      const agentId = getAgentId();
+      const provider = getEmbeddingProviderFromEnv();
+      const result = syncOne(db, { content, type, uri, agent_id: agentId });
+      if (provider && result.memoryId && (result.action === "added" || result.action === "updated" || result.action === "merged")) {
+        try {
+          await embedMemory(db, result.memoryId, provider, { agent_id: agentId });
+        } catch {
+          // best-effort
+        }
+      }
       console.log(`${result.action}: ${result.reason}${result.memoryId ? ` (${result.memoryId.slice(0, 8)})` : ""}`);
       db.close();
       break;
@@ -96,7 +124,9 @@ try {
       const limit = parseInt(getFlag("--limit") ?? "10");
       const { intent } = classifyIntent(query);
       const strategy = getStrategy(intent);
-      const raw = searchBM25(db, query, { agent_id: getAgentId(), limit: limit * 2 });
+      const agentId = getAgentId();
+      const provider = getEmbeddingProviderFromEnv();
+      const raw = await searchHybrid(db, query, { agent_id: agentId, embeddingProvider: provider, limit: limit * 2 });
       const results = rerank(raw, { ...strategy, limit });
 
       console.log(`🔍 Intent: ${intent} | Results: ${results.length}\n`);
@@ -213,10 +243,10 @@ try {
       const agentId = getAgentId();
       let imported = 0;
 
-      // Check for MEMORY.md
-      const memoryMd = resolve(dirPath, "MEMORY.md");
-      if (existsSync(memoryMd)) {
-        const content = readFileSync(memoryMd, "utf-8");
+      // Check for MEMORY.md / MEMORY.qmd
+      const memoryFile = (["MEMORY.md", "MEMORY.qmd"].map((f) => resolve(dirPath, f))).find((p) => existsSync(p));
+      if (memoryFile) {
+        const content = readFileSync(memoryFile, "utf-8");
         const sections = content.split(/^## /m).filter((s) => s.trim());
 
         for (const section of sections) {
@@ -229,17 +259,17 @@ try {
             ? "identity" : "knowledge";
           const uri = `knowledge://memory-md/${title?.replace(/[^a-z0-9\u4e00-\u9fff]/gi, "-").toLowerCase()}`;
 
-          syncOne(db, { content: `## ${title}\n${body}`, type, uri, source: "migrate:MEMORY.md", agent_id: agentId });
+          syncOne(db, { content: `## ${title}\n${body}`, type, uri, source: `migrate:${basename(memoryFile)}`, agent_id: agentId });
           imported++;
         }
-        console.log(`📄 MEMORY.md: ${sections.length} sections imported`);
+        console.log(`📄 ${basename(memoryFile)}: ${sections.length} sections imported`);
       }
 
       // Check for daily journals
-      const mdFiles = readdirSync(dirPath).filter((f) => /^\d{4}-\d{2}-\d{2}\.md$/.test(f)).sort();
+      const mdFiles = readdirSync(dirPath).filter((f) => /^\d{4}-\d{2}-\d{2}\.(md|qmd)$/.test(f)).sort();
       for (const file of mdFiles) {
         const content = readFileSync(resolve(dirPath, file), "utf-8");
-        const date = basename(file, ".md");
+        const date = file.replace(/\.(md|qmd)$/i, "");
         syncOne(db, {
           content,
           type: "event",
@@ -254,10 +284,10 @@ try {
       // Check for weekly summaries
       const weeklyDir = resolve(dirPath, "weekly");
       if (existsSync(weeklyDir)) {
-        const weeklyFiles = readdirSync(weeklyDir).filter((f) => f.endsWith(".md"));
+        const weeklyFiles = readdirSync(weeklyDir).filter((f) => f.endsWith(".md") || f.endsWith(".qmd"));
         for (const file of weeklyFiles) {
           const content = readFileSync(resolve(weeklyDir, file), "utf-8");
-          const week = basename(file, ".md");
+          const week = file.replace(/\.(md|qmd)$/i, "");
           syncOne(db, {
             content,
             type: "knowledge",
@@ -287,8 +317,11 @@ try {
       printHelp();
       process.exit(1);
   }
-} catch (err) {
-  const message = err instanceof Error ? err.message : String(err);
-  console.error("Error:", message);
-  process.exit(1);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("Error:", message);
+    process.exit(1);
+  }
 }
+
+main();

@@ -93,8 +93,8 @@ describe("Sleep Cycle", () => {
   it("tidy cleans orphan paths", () => {
     // Insert an orphan path bypassing FK
     db.pragma("foreign_keys = OFF");
-    db.prepare("INSERT INTO paths (id, memory_id, uri, domain, created_at) VALUES (?,?,?,?,?)")
-      .run("orphan-path", "nonexistent-memory-id", "event://orphan", "event", new Date().toISOString());
+    db.prepare("INSERT INTO paths (id, memory_id, agent_id, uri, domain, created_at) VALUES (?,?,?,?,?,?)")
+      .run("orphan-path", "nonexistent-memory-id", "default", "event://orphan", "event", new Date().toISOString());
     db.pragma("foreign_keys = ON");
 
     const result = runTidy(db);
@@ -107,8 +107,8 @@ describe("Sleep Cycle", () => {
     const m1 = createMemory(db, { content: "node A", type: "knowledge" })!;
     // Insert link with nonexistent target (bypassing FK for test)
     db.pragma("foreign_keys = OFF");
-    db.prepare("INSERT INTO links (source_id, target_id, relation, weight, created_at) VALUES (?,?,?,?,?)")
-      .run(m1.id, "nonexistent-id", "related", 1.0, new Date().toISOString());
+    db.prepare("INSERT INTO links (agent_id, source_id, target_id, relation, weight, created_at) VALUES (?,?,?,?,?,?)")
+      .run("default", m1.id, "nonexistent-id", "related", 1.0, new Date().toISOString());
     db.pragma("foreign_keys = ON");
 
     const result = runGovern(db);

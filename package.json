@@ -1,6 +1,6 @@
 {
   "name": "@smyslenny/agent-memory",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Sleep-cycle memory architecture for AI agents — journal, consolidate, recall. With URI paths, Ebbinghaus decay, knowledge graphs, and MCP support.",
   "type": "module",
   "main": "dist/index.js",
