@@ -7,8 +7,9 @@ import { runTidy } from "../../src/sleep/tidy.js";
 import { runGovern } from "../../src/sleep/govern.js";
 import { runDecay } from "../../src/sleep/decay.js";
 import { boot } from "../../src/sleep/boot.js";
+import { exportMemories } from "../../src/core/export.js";
 import type Database from "better-sqlite3";
-import { unlinkSync } from "fs";
+import { unlinkSync, existsSync, readFileSync, mkdirSync, rmSync } from "fs";
 
 const TEST_DB = "/tmp/agent-memory-sleep-test.db";
 
@@ -194,5 +195,28 @@ describe("Sleep Cycle", () => {
     const remaining = listMemories(db);
     expect(remaining.some((m) => m.type === "identity")).toBe(true);
     expect(remaining.some((m) => m.type === "emotion")).toBe(true);
+  });
+
+  // ── Export ──
+
+  it("exports memories to markdown files", () => {
+    const exportDir = "/tmp/agent-memory-export-test";
+    try { rmSync(exportDir, { recursive: true }); } catch {}
+
+    createMemory(db, { content: "I am Noah", type: "identity" });
+    createMemory(db, { content: "Love is important", type: "emotion" });
+    createMemory(db, { content: "TypeScript is great", type: "knowledge" });
+    createMemory(db, { content: "Configured proxy today", type: "event" });
+
+    const result = exportMemories(db, exportDir);
+    expect(result.exported).toBe(4);
+    expect(result.files.length).toBeGreaterThanOrEqual(2); // MEMORY.md + at least 1 daily
+
+    // Verify MEMORY.md exists and contains content
+    const memoryMd = readFileSync(`${exportDir}/MEMORY.md`, "utf-8");
+    expect(memoryMd).toContain("I am Noah");
+    expect(memoryMd).toContain("TypeScript is great");
+
+    try { rmSync(exportDir, { recursive: true }); } catch {}
   });
 });

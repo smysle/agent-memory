@@ -43,11 +43,14 @@ export function searchBM25(
       )
       .all(ftsQuery, agentId, minVitality, limit) as Array<Memory & { score: number }>;
 
-    return rows.map((row) => ({
-      memory: { ...row, score: undefined } as unknown as Memory,
-      score: Math.abs(row.score), // FTS5 rank is negative (lower = better)
-      matchReason: "bm25",
-    }));
+    return rows.map((row) => {
+      const { score: _score, ...memoryFields } = row;
+      return {
+        memory: memoryFields as Memory,
+        score: Math.abs(row.score), // FTS5 rank is negative (lower = better)
+        matchReason: "bm25",
+      };
+    });
   } catch {
     // FTS query syntax error — fall back to simpler query
     return searchSimple(db, query, agentId, minVitality, limit);

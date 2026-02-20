@@ -84,6 +84,14 @@ export interface DbOptions {
   walMode?: boolean;
 }
 
+/**
+ * Type guard for SQLite count query results.
+ * Validates that a row has a numeric 'c' property.
+ */
+export function isCountRow(row: unknown): row is { c: number } {
+  return row !== null && typeof row === "object" && "c" in (row as Record<string, unknown>) && typeof (row as Record<string, unknown>).c === "number";
+}
+
 export function openDatabase(opts: DbOptions): Database.Database {
   const db = new Database(opts.path);
 

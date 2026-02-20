@@ -23,9 +23,15 @@ const MIN_VITALITY: Record<number, number> = {
   3: 0.0, // P3: event — full decay
 };
 
+/**
+ * Calculate vitality using Ebbinghaus forgetting curve.
+ * @param stability - S parameter (higher = slower decay)
+ * @param daysSinceLastAccess - days since last recall (or creation if never accessed)
+ * @param priority - memory priority (0-3)
+ */
 export function calculateVitality(
   stability: number,
-  daysSinceCreation: number,
+  daysSinceLastAccess: number,
   priority: number,
 ): number {
   // P0 never decays
@@ -35,7 +41,9 @@ export function calculateVitality(
   const S = Math.max(0.01, stability);
 
   // R = e^(-t/S)
-  const retention = Math.exp(-daysSinceCreation / S);
+  // t is measured from last access (recall), matching Ebbinghaus's insight
+  // that forgetting restarts from the most recent retrieval.
+  const retention = Math.exp(-daysSinceLastAccess / S);
 
   // Apply minimum vitality based on priority
   const minVit = MIN_VITALITY[priority] ?? 0.0;
@@ -55,14 +63,17 @@ export function runDecay(db: Database.Database): {
   const currentTime = now();
   const currentMs = new Date(currentTime).getTime();
 
-  // Get all non-P0 memories
+  // Get all non-P0 memories, including last_accessed for proper decay timing
   const memories = db
-    .prepare("SELECT id, priority, stability, created_at, vitality FROM memories WHERE priority > 0")
+    .prepare(
+      "SELECT id, priority, stability, created_at, last_accessed, vitality FROM memories WHERE priority > 0",
+    )
     .all() as Array<{
     id: string;
     priority: number;
     stability: number;
     created_at: string;
+    last_accessed: string | null;
     vitality: number;
   }>;
 
@@ -74,8 +85,11 @@ export function runDecay(db: Database.Database): {
 
   const transaction = db.transaction(() => {
     for (const mem of memories) {
-      const createdMs = new Date(mem.created_at).getTime();
-      const daysSince = (currentMs - createdMs) / (1000 * 60 * 60 * 24);
+      // Use last_accessed if available, otherwise fall back to created_at.
+      // This matches Ebbinghaus: forgetting starts from the last recall.
+      const referenceTime = mem.last_accessed ?? mem.created_at;
+      const referenceMs = new Date(referenceTime).getTime();
+      const daysSince = (currentMs - referenceMs) / (1000 * 60 * 60 * 24);
 
       const newVitality = calculateVitality(mem.stability, daysSince, mem.priority);
 

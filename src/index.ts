@@ -1,7 +1,7 @@
 // AgentMemory v2 — Main library entry point
 
 // Core
-export { openDatabase, type DbOptions } from "./core/db.js";
+export { openDatabase, isCountRow, type DbOptions } from "./core/db.js";
 export {
   createMemory, getMemory, updateMemory, deleteMemory, listMemories,
   recordAccess, countMemories, contentHash,
@@ -20,6 +20,7 @@ export {
   type Snapshot, type SnapshotAction,
 } from "./core/snapshot.js";
 export { guard, type GuardResult, type GuardAction } from "./core/guard.js";
+export { exportMemories, type ExportResult } from "./core/export.js";
 
 // Search
 export { searchBM25, type SearchResult } from "./search/bm25.js";

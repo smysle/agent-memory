@@ -137,4 +137,34 @@ describe("Search & Decay", () => {
     expect(result.updated).toBeGreaterThan(0);
     expect(result.decayed).toBeGreaterThan(0);
   });
+
+  it("runDecay uses last_accessed instead of created_at when available", () => {
+    // Create a P3 memory with old created_at but recent last_accessed
+    const mem = createMemory(db, { content: "accessed recently", type: "event" })!;
+    const recentDate = new Date(Date.now() - 1000 * 60 * 60).toISOString(); // 1 hour ago
+    db.prepare("UPDATE memories SET created_at = ?, last_accessed = ? WHERE id = ?").run(
+      "2020-01-01T00:00:00.000Z", // very old creation
+      recentDate,                  // but accessed recently
+      mem.id,
+    );
+
+    runDecay(db);
+    const updated = (db.prepare("SELECT vitality FROM memories WHERE id = ?").get(mem.id) as { vitality: number });
+    // Should still have high vitality because last_accessed is recent
+    expect(updated.vitality).toBeGreaterThan(0.9);
+  });
+
+  it("runDecay falls back to created_at when last_accessed is null", () => {
+    const mem = createMemory(db, { content: "never accessed event", type: "event" })!;
+    // Old created_at, no last_accessed
+    db.prepare("UPDATE memories SET created_at = ?, last_accessed = NULL WHERE id = ?").run(
+      "2025-01-01T00:00:00.000Z",
+      mem.id,
+    );
+
+    runDecay(db);
+    const updated = (db.prepare("SELECT vitality FROM memories WHERE id = ?").get(mem.id) as { vitality: number });
+    // Should have decayed significantly (old creation, never accessed)
+    expect(updated.vitality).toBeLessThan(0.5);
+  });
 });
