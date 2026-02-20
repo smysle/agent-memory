@@ -1,16 +1,60 @@
 {
   "name": "agent-memory",
-  "version": "1.0.0",
-  "description": "Sleep-cycle memory architecture for AI agents — journal, consolidate, recall",
-  "main": "src/index.js",
+  "version": "2.0.0",
+  "description": "Sleep-cycle memory architecture for AI agents — journal, consolidate, recall. With URI paths, Ebbinghaus decay, knowledge graphs, and MCP support.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
-    "agent-memory": "bin/agent-memory.js"
+    "agent-memory": "dist/bin/agent-memory.js"
   },
-  "keywords": ["ai", "agent", "memory", "llm", "persistent-memory", "context-engineering"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
+  },
+  "keywords": [
+    "agent-memory",
+    "ai-agent",
+    "mcp",
+    "memory-system",
+    "sleep-cycle",
+    "ebbinghaus",
+    "knowledge-graph",
+    "sqlite",
+    "typescript"
+  ],
   "author": "smysle",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/smysle/agent-memory"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "better-sqlite3": "^11.8.1",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.13.4",
+    "@types/uuid": "^10.0.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
   }
 }

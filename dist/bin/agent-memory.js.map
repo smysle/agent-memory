@@ -1,0 +1,1 @@
+{"version":3,"sources":["../../src/bin/agent-memory.ts"],"sourcesContent":["#!/usr/bin/env node\n// AgentMemory v2 — CLI placeholder\nconsole.log(\"agent-memory CLI — coming soon\");\n"],"mappings":";;;;AAEA,QAAQ,IAAI,qCAAgC;","names":[]}
