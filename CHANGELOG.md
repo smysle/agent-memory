@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.1 (2026-02-21)
+
+### 📝 Documentation
+
+- **Memory-janitor integration guide** — New `examples/openclaw-setup.md` section explaining what a memory janitor is and how to wire it to agent-memory (decay trigger + consistency check) ([PR #2](https://github.com/smysle/agent-memory/pull/2))
+- **Phase 5 prompt template** — New `examples/memory-janitor-phase5.md` with full prompt template for appending decay + consistency phases to an existing janitor cron job
+- Covers Gap 1 (Ebbinghaus decay never fires without external trigger) and Gap 2 (two-store divergence between agent-memory and canonical memory files)
+- Includes configurable conflict resolution strategies (canonical wins / agent-memory wins / manual review)
+
 ## 2.0.0 (2026-02-20)
 
 ### 🎉 Complete Rewrite
