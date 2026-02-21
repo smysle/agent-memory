@@ -290,7 +290,10 @@ _实现过程中如果偏离本文档，在此记录变更原因_
 
 | 日期 | 变更 | 原因 |
 |------|------|------|
-| | | |
+| 2026-02-21 | memory-surface 未直接在 cron prompt 内串联多次 `mcporter call`，改为调用 `~/.openclaw/workspace/scripts/memory_surface.py`，由脚本统一执行 recall/recall_path、去重、排序、fallback、写 RECENT.md | 降低 prompt 漂移风险，保证 `RECENT.md` 结构和 80 行上限稳定；便于后续维护与调试 |
+| 2026-02-21 | `recall_path` 参数由设计稿中的 `path=` 调整为 `uri=` | 实际 MCP 工具 schema 要求 `uri` 字段；`path` 会触发参数校验错误 |
+| 2026-02-21 | memory-tidy 保留现网 `MEMORY.md` 200 行上限，仅补充 Phase 4 reflect+consistency，不回退到 80 行 | 避免对现有长期记忆容量策略造成行为回退；本 DD 目标聚焦于 Markdown × agent-memory 融合链路 |
+| 2026-02-21 | 额外补充 `~/.openclaw/openclaw.json` 的 `cron` 配置块（enabled/store/maxConcurrentRuns/sessionRetention） | 使 cron 持久化位置与并发参数显式化，便于运维核对与后续迁移 |
 
 ---
 
