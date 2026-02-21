@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.2 (2026-02-22)
+
+### 🔗 OpenClaw Integration V1 (Cron Synchronization)
+
+- **Capture → Consolidate → Surface closed loop** — agent-memory now integrates seamlessly with OpenClaw's built-in memory cron jobs (`memory-sync`, `memory-tidy`, `memory-surface`) with zero code changes ([DD-0004](docs/design/0004-agent-memory-integration.md))
+- **memory-sync** (14:00 & 22:00): Each new journal bullet is auto-synced to agent-memory via `mcporter call agent-memory.remember` with keyword-based type classification and URI dedup
+- **memory-tidy** (03:00): Triggers `agent-memory.reflect phase=all` (Ebbinghaus decay + tidy + govern) after Markdown consolidation, with consistency spot-check
+- **memory-surface** (14:05 & 22:05): Generates structured `RECENT.md` (≤80 lines) from high-vitality agent-memory entries, with fallback to raw journal reading
+- **Design principle**: Markdown remains source of truth; agent-memory is a derived index layer with best-effort sync
+- **README updated** with full OpenClaw Integration guide
+
 ## 2.1.1 (2026-02-21)
 
 ### 📝 Documentation

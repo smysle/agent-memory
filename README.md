@@ -119,6 +119,46 @@ runDecay(db);
 
 **9 MCP Tools:** `remember` · `recall` · `recall_path` · `boot` · `forget` · `link` · `snapshot` · `reflect` · `status`
 
+## 🔗 OpenClaw Integration
+
+AgentMemory works **out of the box** with [OpenClaw](https://github.com/smysle/openclaw)'s built-in memory cron jobs — no code changes required. The integration implements a **Capture → Consolidate → Surface** closed loop that keeps Markdown journals and the structured memory DB in sync automatically.
+
+### How It Works
+
+```
+  Capture (memory-sync)          Consolidate (memory-tidy)        Surface (memory-surface)
+  ─────────────────────          ─────────────────────────        ───────────────────────
+  14:00 & 22:00                  03:00                            14:05 & 22:05
+  Session → daily journal        Compress old dailies             Recall top memories
+  + remember each bullet         Distill → MEMORY.md             → generate RECENT.md
+    into agent-memory DB         + reflect phase=all              (≤80 lines, 3 sections)
+```
+
+| Phase | Cron Job | What Happens | agent-memory Integration |
+|-------|----------|-------------|--------------------------|
+| **Capture** | `memory-sync` | Scans sessions, appends bullets to `memory/YYYY-MM-DD.md` | Each new bullet is also written via `mcporter call agent-memory.remember` with auto-classified type and URI-based dedup |
+| **Consolidate** | `memory-tidy` | Compresses old dailies → weekly summaries, distills `MEMORY.md` | Triggers `agent-memory.reflect phase=all` (decay + tidy + govern) + consistency spot-check |
+| **Surface** | `memory-surface` | Generates short-term context for new sessions | Reads high-vitality memories from agent-memory, outputs structured `RECENT.md` with emotion/knowledge/event sections |
+
+### Key Design Principles
+
+- **Markdown is source of truth** — agent-memory is a derived index layer; all data flows Markdown → DB, never the reverse.
+- **Best-effort sync** — If `mcporter` or agent-memory is unavailable, Markdown operations proceed normally. Failures only log warnings.
+- **URI-based idempotency** — Each journal bullet maps to a unique URI (`event://journal/2026-02-21#2200-1`), so re-runs are safe.
+- **Keyword-based classification** — Bullets are auto-classified as `knowledge`, `emotion`, or `event` using simple keyword rules (no extra model calls).
+
+### Setup
+
+If you're running OpenClaw with the standard memory cron suite (`memory-sync`, `memory-tidy`, `memory-surface`), the integration is **already active** — the cron prompts include agent-memory sync steps. Just make sure:
+
+1. **agent-memory is installed and initialized** — `agent-memory init`
+2. **mcporter bridge is configured** — agent-memory MCP server registered in your mcporter config
+3. **Cron jobs are enabled** — check with `openclaw cron list`
+
+For detailed setup and prompt templates, see:
+- [`examples/openclaw-setup.md`](examples/openclaw-setup.md) — Full setup walkthrough
+- [`docs/design/0004-agent-memory-integration.md`](docs/design/0004-agent-memory-integration.md) — Design document (DD-0004)
+
 ## 🏗️ Architecture
 
 ```
