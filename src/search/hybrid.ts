@@ -89,7 +89,8 @@ export async function searchHybrid(
   }
 
   // Semantic retrieval: brute-force cosine over stored embeddings for the agent.
-  const qVec = Float32Array.from(await provider.embed(query));
+  const embedFn = provider.embedQuery ?? provider.embed;
+  const qVec = Float32Array.from(await embedFn.call(provider, query));
   const embeddings = listEmbeddings(db, agentId, model);
 
   const scored: Array<{ id: string; score: number }> = [];

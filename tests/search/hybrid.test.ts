@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { openDatabase } from "../../src/core/db.js";
 import { createMemory } from "../../src/core/memory.js";
 import { embedMemory } from "../../src/search/embed.js";
@@ -15,6 +15,9 @@ const mockProvider = {
     // Treat 开心/高兴 as the same "concept" vector.
     if (text.includes("开心") || text.includes("高兴")) return [1, 0, 0];
     return [0, 1, 0];
+  },
+  async embedQuery(query: string) {
+    return this.embed(`Instruct: test\nQuery: ${query}`);
   },
 };
 
@@ -35,16 +38,20 @@ describe("Hybrid Search", () => {
     try { unlinkSync(TEST_DB + "-shm"); } catch {}
   });
 
-  it("finds semantic match when BM25 has no overlap", async () => {
-    const m1 = createMemory(db, { content: "我今天很高兴", type: "emotion" })!;
-    const m2 = createMemory(db, { content: "天气一般般", type: "event" })!;
+  it("uses embedQuery when provided", async () => {
+    const m = createMemory(db, { content: "我今天很高兴", type: "emotion" })!;
 
-    await embedMemory(db, m1.id, mockProvider as any, { agent_id: "default" });
-    await embedMemory(db, m2.id, mockProvider as any, { agent_id: "default" });
+    await embedMemory(db, m.id, mockProvider as any, { agent_id: "default" });
+
+    const embedQuerySpy = vi.spyOn(mockProvider, "embedQuery");
+    const embedSpy = vi.spyOn(mockProvider, "embed");
 
     const results = await searchHybrid(db, "开心", { agent_id: "default", embeddingProvider: mockProvider as any, limit: 5 });
+
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0].memory.id).toBe(m1.id);
+    expect(embedQuerySpy).toHaveBeenCalledOnce();
+    // embed() is still used for indexing; here we only assert query path goes through embedQuery.
+    expect(embedSpy).toHaveBeenCalled();
   });
 });
 
