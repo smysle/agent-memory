@@ -9,9 +9,10 @@ import { createLink, getLinks, traverse } from "../core/link.js";
 import { createSnapshot, getSnapshot, getSnapshots, rollback } from "../core/snapshot.js";
 import { guard } from "../core/guard.js";
 import { classifyIntent, getStrategy } from "../search/intent.js";
-import { rerank } from "../search/rerank.js";
+import { rerank, rerankWithProvider } from "../search/rerank.js";
 import { searchHybrid } from "../search/hybrid.js";
 import { getEmbeddingProviderFromEnv } from "../search/providers.js";
+import { getRerankerProviderFromEnv } from "../search/rerank-provider.js";
 import { embedMemory } from "../search/embed.js";
 import { syncOne } from "../sleep/sync.js";
 import { runDecay } from "../sleep/decay.js";
@@ -26,6 +27,7 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
   const db = openDatabase({ path: dbPath ?? DB_PATH });
   const aid = agentId ?? AGENT_ID;
   const embeddingProvider = getEmbeddingProviderFromEnv();
+  const rerankerProvider = getRerankerProviderFromEnv();
 
   const server = new McpServer({
     name: "agent-memory",
@@ -69,7 +71,12 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
     async ({ query, limit }) => {
       const { intent, confidence } = classifyIntent(query);
       const strategy = getStrategy(intent);
-      const raw = await searchHybrid(db, query, { agent_id: aid, embeddingProvider, limit: limit * 2 });
+      let raw = await searchHybrid(db, query, { agent_id: aid, embeddingProvider, limit: limit * 2 });
+
+      if (rerankerProvider) {
+        raw = await rerankWithProvider(raw, query, rerankerProvider);
+      }
+
       const results = rerank(raw, { ...strategy, limit });
 
       const output = {

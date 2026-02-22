@@ -1,6 +1,39 @@
 // AgentMemory v2 — Search result reranking + priority weighting
 import type { SearchResult } from "./bm25.js";
 import type { SearchIntent } from "./intent.js";
+import type { RerankProvider } from "./rerank-provider.js";
+
+/**
+ * Optionally rerank results using an external semantic reranker provider.
+ * Best-effort: on failure, returns original results unchanged.
+ */
+export async function rerankWithProvider(
+  results: SearchResult[],
+  query: string,
+  provider: RerankProvider,
+): Promise<SearchResult[]> {
+  if (results.length === 0) return results;
+
+  const documents = results.map((r) => r.memory.content);
+
+  try {
+    const apiResults = await provider.rerank(query, documents);
+    const scoreMap = new Map(apiResults.map((r) => [r.index, r.relevance_score]));
+
+    return results.map((r, i) => {
+      const score = scoreMap.get(i);
+      if (score === undefined) return r;
+      return {
+        ...r,
+        score,
+        matchReason: `${r.matchReason}+rerank`,
+      };
+    });
+  } catch (err) {
+    console.warn("[agent-memory] External rerank failed, falling back:", err);
+    return results;
+  }
+}
 
 /**
  * Rerank search results based on intent strategy and priority weighting.
