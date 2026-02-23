@@ -1,9 +1,8 @@
-// AgentMemory v2 — Sleep sync engine (light sleep phase)
+// AgentMemory v3 — Sleep sync engine (light sleep phase)
 // Captures new information, deduplicates, writes structured memories
 import type Database from "better-sqlite3";
-import { createMemory, type CreateMemoryInput, type Memory } from "../core/memory.js";
-import { createPath, getPathByUri } from "../core/path.js";
-import { createSnapshot } from "../core/snapshot.js";
+import { createMemory, type CreateMemoryInput } from "../core/memory.js";
+import { createPath } from "../core/path.js";
 import { guard } from "../core/guard.js";
 import { updateMemory } from "../core/memory.js";
 
@@ -62,7 +61,6 @@ export function syncOne(db: Database.Database, input: SyncInput): SyncResult {
 
     case "update": {
       if (!guardResult.existingId) return { action: "skipped", reason: "No existing ID for update" };
-      createSnapshot(db, guardResult.existingId, "update", "sync");
       updateMemory(db, guardResult.existingId, { content: input.content });
       return { action: "updated", memoryId: guardResult.existingId, reason: guardResult.reason };
     }
@@ -71,7 +69,6 @@ export function syncOne(db: Database.Database, input: SyncInput): SyncResult {
       if (!guardResult.existingId || !guardResult.mergedContent) {
         return { action: "skipped", reason: "Missing merge data" };
       }
-      createSnapshot(db, guardResult.existingId, "merge", "sync");
       updateMemory(db, guardResult.existingId, { content: guardResult.mergedContent });
       return { action: "merged", memoryId: guardResult.existingId, reason: guardResult.reason };
     }

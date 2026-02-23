@@ -3,7 +3,6 @@ import Database from "better-sqlite3";
 import { openDatabase } from "../../src/core/db.js";
 import { createMemory } from "../../src/core/memory.js";
 import { createPath, getPathByUri } from "../../src/core/path.js";
-import { getLinks } from "../../src/core/link.js";
 import { unlinkSync } from "fs";
 
 const TEST_DB = "/tmp/agent-memory-migration-test.db";
@@ -81,7 +80,7 @@ afterEach(() => {
 });
 
 describe("Schema migration", () => {
-  it("migrates v1 paths/links to v2 agent-scoped tables", () => {
+  it("migrates v1 paths/links to v3 schema while preserving compatibility", () => {
     const v1 = createV1Database(TEST_DB);
 
     const a = createMemory(v1 as any, { content: "A", type: "identity", agent_id: "agent-a" })!;
@@ -96,7 +95,7 @@ describe("Schema migration", () => {
       new Date().toISOString(),
     );
 
-    // Cross-agent link was possible in v1; should be removed during migration.
+    // Cross-agent link was possible in v1; migration should remove incompatible links.
     v1.prepare("INSERT INTO links (source_id, target_id, relation, weight, created_at) VALUES (?,?,?,?,?)").run(
       a.id,
       b.id,
@@ -111,8 +110,13 @@ describe("Schema migration", () => {
 
     const version = (db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined)?.value;
     expect(version).toBe("3");
+
     const embeddingsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='embeddings'").get() as { name: string } | undefined;
+    const linksTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='links'").get() as { name: string } | undefined;
+    const snapshotsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='snapshots'").get() as { name: string } | undefined;
     expect(Boolean(embeddingsTable?.name)).toBe(true);
+    expect(Boolean(linksTable?.name)).toBe(true);
+    expect(Boolean(snapshotsTable?.name)).toBe(true);
 
     const cols = db.prepare("PRAGMA table_info(paths)").all() as Array<{ name: string }>;
     expect(cols.some((c) => c.name === "agent_id")).toBe(true);
@@ -121,10 +125,10 @@ describe("Schema migration", () => {
     expect(migratedPath?.agent_id).toBe("agent-a");
     expect(migratedPath?.memory_id).toBe(a.id);
 
-    const links = getLinks(db, a.id, "agent-a");
-    expect(links).toHaveLength(0);
+    const linksRemaining = (db.prepare("SELECT COUNT(*) as c FROM links").get() as { c: number }).c;
+    expect(linksRemaining).toBe(0);
 
-    // After v2 migration, two agents can share the same URI without conflict.
+    // After v2+ migration, two agents can share the same URI without conflict.
     createPath(db, b.id, "core://user/name");
     const bPath = getPathByUri(db, "core://user/name", "agent-b");
     expect(bPath?.memory_id).toBe(b.id);

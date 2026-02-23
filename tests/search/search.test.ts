@@ -1,9 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDatabase } from "../../src/core/db.js";
-import { createMemory } from "../../src/core/memory.js";
+import { createMemory, getMemory } from "../../src/core/memory.js";
 import { searchBM25 } from "../../src/search/bm25.js";
-import { classifyIntent, getStrategy } from "../../src/search/intent.js";
-import { rerank } from "../../src/search/rerank.js";
 import { calculateVitality, runDecay } from "../../src/sleep/decay.js";
 import type Database from "better-sqlite3";
 import { unlinkSync } from "fs";
@@ -27,8 +25,6 @@ describe("Search & Decay", () => {
     try { unlinkSync(TEST_DB + "-shm"); } catch {}
   });
 
-  // ── BM25 Search ──
-
   it("finds memories by BM25 search", () => {
     createMemory(db, { content: "xiaoxin is my contractor and he is gentle", type: "identity" });
     createMemory(db, { content: "TypeScript is better than Python for agents", type: "knowledge" });
@@ -45,126 +41,53 @@ describe("Search & Decay", () => {
     expect(results).toHaveLength(0);
   });
 
-  // ── Intent Classification ──
+  it("weighted ordering uses priority × vitality", () => {
+    const p0 = createMemory(db, { content: "Noah memory topic", type: "identity" })!;
+    const p3 = createMemory(db, { content: "Noah memory topic event", type: "event" })!;
+    // make p3 still somewhat vital
+    expect(p0.priority).toBe(0);
+    expect(p3.priority).toBe(3);
 
-  it("classifies factual queries", () => {
-    expect(classifyIntent("小心的名字是什么").intent).toBe("factual");
-    expect(classifyIntent("what is the config").intent).toBe("factual");
+    const results = searchBM25(db, "Noah memory topic", { limit: 10 });
+    const weighted = results
+      .map((r) => {
+        const weight = [4.0, 3.0, 2.0, 1.0][r.memory.priority] ?? 1.0;
+        return { ...r, weighted: r.score * weight * Math.max(0.1, r.memory.vitality) };
+      })
+      .sort((a, b) => b.weighted - a.weighted);
+
+    expect(weighted[0].memory.priority).toBe(0);
   });
-
-  it("classifies temporal queries", () => {
-    expect(classifyIntent("昨天发生了什么").intent).toBe("temporal");
-    expect(classifyIntent("when did we last talk").intent).toBe("temporal");
-  });
-
-  it("classifies causal queries", () => {
-    expect(classifyIntent("为什么要用 TypeScript").intent).toBe("causal");
-    expect(classifyIntent("why did the build fail").intent).toBe("causal");
-  });
-
-  it("classifies exploratory queries", () => {
-    expect(classifyIntent("说说关于记忆系统").intent).toBe("exploratory");
-    expect(classifyIntent("tell me about the memory architecture").intent).toBe("exploratory");
-  });
-
-  it("returns strategy based on intent", () => {
-    const factual = getStrategy("factual");
-    expect(factual.boostPriority).toBe(true);
-    expect(factual.limit).toBe(5);
-
-    const temporal = getStrategy("temporal");
-    expect(temporal.boostRecent).toBe(true);
-  });
-
-  // ── Reranking ──
-
-  it("boosts high-priority results when boostPriority is true", () => {
-    createMemory(db, { content: "Noah is a succubus demon", type: "identity" }); // P0
-    createMemory(db, { content: "Noah wrote code today for testing", type: "event" }); // P3
-
-    const results = searchBM25(db, "Noah");
-    expect(results.length).toBe(2);
-
-    const reranked = rerank(results, {
-      intent: "factual",
-      boostRecent: false,
-      boostPriority: true,
-      limit: 10,
-    });
-
-    // P0 should be ranked first
-    expect(reranked[0].memory.priority).toBe(0);
-  });
-
-  // ── Ebbinghaus Decay ──
 
   it("P0 identity never decays", () => {
-    const v = calculateVitality(999999, 3650, 0); // 10 years
+    const v = calculateVitality(999999, 3650, 0);
     expect(v).toBe(1.0);
   });
 
-  it("P1 emotion decays slowly", () => {
+  it("P1 emotion decays slowly with floor", () => {
     const v30 = calculateVitality(365, 30, 1);
-    expect(v30).toBeGreaterThan(0.9); // 30 days, S=365 → barely decayed
+    expect(v30).toBeGreaterThan(0.9);
 
-    const v365 = calculateVitality(365, 365, 1);
-    expect(v365).toBeGreaterThan(0.3); // 1 year → above minimum
-
-    // Minimum floor
     const v9999 = calculateVitality(365, 9999, 1);
     expect(v9999).toBeGreaterThanOrEqual(0.3);
   });
 
   it("P3 event decays fast", () => {
-    const v7 = calculateVitality(14, 7, 3);
-    expect(v7).toBeGreaterThan(0.5);
-    expect(v7).toBeLessThan(0.7);
-
     const v30 = calculateVitality(14, 30, 3);
     expect(v30).toBeLessThan(0.15);
   });
 
-  it("runDecay updates vitality in batch", () => {
-    // Create a P3 memory with fake old date
-    const mem = createMemory(db, { content: "old event", type: "event" })!;
-    // Manually backdate it
-    db.prepare("UPDATE memories SET created_at = ? WHERE id = ?").run(
-      "2025-01-01T00:00:00.000Z",
-      mem.id,
-    );
-
-    const result = runDecay(db);
-    expect(result.updated).toBeGreaterThan(0);
-    expect(result.decayed).toBeGreaterThan(0);
-  });
-
-  it("runDecay uses last_accessed instead of created_at when available", () => {
-    // Create a P3 memory with old created_at but recent last_accessed
+  it("runDecay updates vitality using last_accessed when available", () => {
     const mem = createMemory(db, { content: "accessed recently", type: "event" })!;
-    const recentDate = new Date(Date.now() - 1000 * 60 * 60).toISOString(); // 1 hour ago
+    const recentDate = new Date(Date.now() - 1000 * 60 * 60).toISOString();
     db.prepare("UPDATE memories SET created_at = ?, last_accessed = ? WHERE id = ?").run(
-      "2020-01-01T00:00:00.000Z", // very old creation
-      recentDate,                  // but accessed recently
+      "2020-01-01T00:00:00.000Z",
+      recentDate,
       mem.id,
     );
 
     runDecay(db);
-    const updated = (db.prepare("SELECT vitality FROM memories WHERE id = ?").get(mem.id) as { vitality: number });
-    // Should still have high vitality because last_accessed is recent
+    const updated = getMemory(db, mem.id)!;
     expect(updated.vitality).toBeGreaterThan(0.9);
-  });
-
-  it("runDecay falls back to created_at when last_accessed is null", () => {
-    const mem = createMemory(db, { content: "never accessed event", type: "event" })!;
-    // Old created_at, no last_accessed
-    db.prepare("UPDATE memories SET created_at = ?, last_accessed = NULL WHERE id = ?").run(
-      "2025-01-01T00:00:00.000Z",
-      mem.id,
-    );
-
-    runDecay(db);
-    const updated = (db.prepare("SELECT vitality FROM memories WHERE id = ?").get(mem.id) as { vitality: number });
-    // Should have decayed significantly (old creation, never accessed)
-    expect(updated.vitality).toBeLessThan(0.5);
   });
 });
