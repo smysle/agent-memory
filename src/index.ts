@@ -18,6 +18,19 @@ export { exportMemories, type ExportResult } from "./core/export.js";
 export { searchBM25, type SearchResult } from "./search/bm25.js";
 export { tokenize } from "./search/tokenizer.js";
 
+// Ingest
+export {
+  ingestText,
+  splitIngestBlocks,
+  classifyIngestType,
+  extractIngestItems,
+  slugify,
+  type IngestResult,
+  type IngestRunOptions,
+  type IngestExtractedItem,
+} from "./ingest/ingest.js";
+export { runAutoIngestWatcher, type AutoIngestWatcherOptions, type AutoIngestWatcher } from "./ingest/watcher.js";
+
 // Sleep
 export { calculateVitality, runDecay, getDecayedMemories } from "./sleep/decay.js";
 export { syncOne, syncBatch, type SyncInput, type SyncResult } from "./sleep/sync.js";

@@ -1,57 +1,61 @@
 # Changelog
 
-## 2.1.2 (2026-02-22)
+## 3.0.1 (2026-02-24)
 
-### 🔗 OpenClaw Integration V1 (Cron Synchronization)
+### 🛠️ OpenClaw P0 fixes
 
-- **Capture → Consolidate → Surface closed loop** — agent-memory now integrates seamlessly with OpenClaw's built-in memory cron jobs (`memory-sync`, `memory-tidy`, `memory-surface`) with zero code changes ([DD-0004](docs/design/0004-agent-memory-integration.md))
-- **memory-sync** (14:00 & 22:00): Each new journal bullet is auto-synced to agent-memory via `mcporter call agent-memory.remember` with keyword-based type classification and URI dedup
-- **memory-tidy** (03:00): Triggers `agent-memory.reflect phase=all` (Ebbinghaus decay + tidy + govern) after Markdown consolidation, with consistency spot-check
-- **memory-surface** (14:05 & 22:05): Generates structured `RECENT.md` (≤80 lines) from high-vitality agent-memory entries, with fallback to raw journal reading
-- **Design principle**: Markdown remains source of truth; agent-memory is a derived index layer with best-effort sync
-- **README updated** with full OpenClaw Integration guide
+- **Fixed memory-sync session path mismatch** in cron prompt:
+  - removed hardcoded `~/.openclaw/agents/main/sessions/*.jsonl`
+  - switched to dynamic discovery with `noah` + env-derived agent path + `main` fallback
+- **Aligned memory-tidy prompt** with the same session path health check strategy
+- **Added memory-sync health output contract**:
+  - `session_scan_glob`
+  - `session_file_count`
+  - `latest_session_file`
+  - `extracted_message_count`
+  - `appended_bullet_count`
+  - `synced_memory_count`
+  - `sync_error_count`
 
-## 2.1.1 (2026-02-21)
+### ✨ Auto-ingest watcher implemented
 
-### 📝 Documentation
+- Added `fs.watch`-based auto-ingest watcher for:
+  - `~/.openclaw/workspace/memory/*.md`
+  - `~/.openclaw/workspace/MEMORY.md`
+- New module: `src/ingest/watcher.ts`
+- MCP server now starts watcher by default (configurable):
+  - `AGENT_MEMORY_AUTO_INGEST=0` to disable
+  - `AGENT_MEMORY_WORKSPACE` to override workspace path
 
-- **Memory-janitor integration guide** — New `examples/openclaw-setup.md` section explaining what a memory janitor is and how to wire it to agent-memory (decay trigger + consistency check) ([PR #2](https://github.com/smysle/agent-memory/pull/2))
-- **Phase 5 prompt template** — New `examples/memory-janitor-phase5.md` with full prompt template for appending decay + consistency phases to an existing janitor cron job
-- Covers Gap 1 (Ebbinghaus decay never fires without external trigger) and Gap 2 (two-store divergence between agent-memory and canonical memory files)
-- Includes configurable conflict resolution strategies (canonical wins / agent-memory wins / manual review)
+### 🧱 Ingest refactor + tests
 
-## 2.0.0 (2026-02-20)
+- Extracted ingest core logic from MCP server into reusable module:
+  - `src/ingest/ingest.ts`
+- MCP `ingest` tool now delegates to shared `ingestText()`
+- Added ingest tests:
+  - dry-run extraction does not write DB
+  - source marker stored as `auto:{source}`
 
-### 🎉 Complete Rewrite
+### 📚 Documentation realigned to v3 reality
 
-AgentMemory v2 is a ground-up rewrite incorporating the best ideas from 4 open-source memory projects (nocturne_memory, Memory Palace, PowerMem, our v1) while keeping the codebase minimal (3 dependencies).
+- Rewrote `README.md` and `README.en.md` to match actual v3 capabilities
+- Removed stale v2-era claims (embedding/reranker/link/snapshot/hybrid stack narrative)
+- Added explicit auto-ingest watcher behavior and env vars
 
-### ✨ New Features
+---
 
-- **URI Path System** — `core://`, `emotion://`, `knowledge://`, `event://` namespaces with Content-Path separation
-- **Write Guard** — Hash dedup → URI conflict → BM25 similarity → 4-criterion gate pipeline
-- **Ebbinghaus Forgetting Curve** — Scientific decay model `R = e^(-t/S)` with recall strengthening
-- **Knowledge Graph** — Association links with multi-hop BFS traversal
-- **Snapshot/Rollback** — Auto-snapshot before every modification, one-click restore
-- **Intent-Aware Search** — Factual / temporal / causal / exploratory query classification
-- **Sleep Cycle Engine** — Automated sync → decay → tidy → govern pipeline
-- **Priority System** — P0 identity (never decays) through P3 event (14-day half-life)
-- **Multi-Agent Isolation** — Per-agent memory scoping via `agent_id`
-- **MCP Server** — 9 tools for Claude Code / Cursor / OpenClaw integration
-- **CLI** — 7 commands: init, remember, recall, boot, status, reflect, migrate
-- **Markdown Migration** — Import existing MEMORY.md + daily journals + weekly summaries
+## 3.0.0 (2026-02-23)
 
-### 📊 Stats
+### 🎉 v3 Simplification
 
-- 14 source modules
-- 9 MCP tools
-- 7 CLI commands
-- 41 tests passing
-- 3 production dependencies
+- Repositioned agent-memory as a structured companion to memory-core
+- Removed redundant v2 capabilities at API/tooling level
+- MCP toolset finalized at 9 tools:
+  - `remember`, `recall`, `recall_path`, `boot`, `forget`, `reflect`, `status`, `ingest`, `surface`
+- Added narrative warm-boot and human-readable reflect report
 
-### 🙏 Inspired By
+---
 
-- [nocturne_memory](https://github.com/Dataojitori/nocturne_memory) — URI paths, Content-Path separation, boot loading
-- [Memory Palace](https://github.com/AGI-is-going-to-arrive/Memory-Palace) — Write Guard, intent search, vitality decay
-- [PowerMem](https://github.com/oceanbase/powermem) — Ebbinghaus curve, knowledge graph, multi-agent
-- Our v1 production experience — Sleep cycle, dedup, 4-criterion gate, emotional priority
+## 2.x (legacy)
+
+v2.x included embedding/reranker/link/snapshot-era behavior. See git history and design docs for full details.

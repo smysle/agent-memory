@@ -10,7 +10,6 @@ import {
   countMemories,
   recordAccess,
   type Memory,
-  type MemoryType,
 } from "../core/memory.js";
 import { getPathByUri, getPathsByPrefix } from "../core/path.js";
 import { searchBM25 } from "../search/bm25.js";
@@ -19,6 +18,8 @@ import { runDecay } from "../sleep/decay.js";
 import { runTidy } from "../sleep/tidy.js";
 import { runGovern } from "../sleep/govern.js";
 import { boot } from "../sleep/boot.js";
+import { ingestText } from "../ingest/ingest.js";
+import { runAutoIngestWatcher } from "../ingest/watcher.js";
 
 const DB_PATH = process.env.AGENT_MEMORY_DB ?? "./agent-memory.db";
 const AGENT_ID = process.env.AGENT_MEMORY_AGENT_ID ?? "default";
@@ -41,70 +42,6 @@ function formatMemory(memory: Memory, score?: number) {
     score,
     updated_at: memory.updated_at,
   };
-}
-
-function slugify(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fff\s-]/g, " ")
-    .trim()
-    .replace(/\s+/g, "-")
-    .slice(0, 64) || "item";
-}
-
-function classifyIngestType(text: string): MemoryType {
-  const t = text.toLowerCase();
-
-  if (/##\s*身份|\bidentity\b|\b我是\b|我是/.test(text)) {
-    return "identity";
-  }
-  if (/##\s*情感|❤️|💕|爱你|感动|难过|开心|害怕|想念|表白/.test(text)) {
-    return "emotion";
-  }
-  if (/##\s*决策|##\s*技术|选型|教训|\bknowledge\b|⚠️|复盘|经验/.test(text)) {
-    return "knowledge";
-  }
-  if (/\d{4}-\d{2}-\d{2}|发生了|完成了|今天|昨日|刚刚|部署|上线/.test(text)) {
-    return "event";
-  }
-
-  return "knowledge";
-}
-
-function splitIngestBlocks(text: string): Array<{ title: string; content: string }> {
-  const headingRegex = /^##\s+(.+)$/gm;
-  const matches = [...text.matchAll(headingRegex)];
-  const blocks: Array<{ title: string; content: string }> = [];
-
-  if (matches.length > 0) {
-    for (let i = 0; i < matches.length; i++) {
-      const match = matches[i];
-      const start = match.index ?? 0;
-      const end = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length;
-      const raw = text.slice(start, end).trim();
-      const lines = raw.split("\n");
-      const title = lines[0].replace(/^##\s+/, "").trim();
-      const content = lines.slice(1).join("\n").trim();
-      if (content) blocks.push({ title, content });
-    }
-    return blocks;
-  }
-
-  // fallback: bullet blocks
-  const bullets = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => /^[-*]\s+/.test(l))
-    .map((l) => l.replace(/^[-*]\s+/, "").trim())
-    .filter(Boolean);
-
-  if (bullets.length > 0) {
-    return bullets.map((content, i) => ({ title: `bullet-${i + 1}`, content }));
-  }
-
-  const plain = text.trim();
-  if (!plain) return [];
-  return [{ title: "ingest", content: plain }];
 }
 
 function formatWarmBootNarrative(
@@ -555,72 +492,17 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
       dry_run: z.boolean().default(false).optional().describe("Preview extraction without writing"),
     },
     async ({ text, source, dry_run }) => {
-      const dryRun = dry_run ?? false;
-      const blocks = splitIngestBlocks(text);
-
-      const extracted = blocks.map((b, idx) => {
-        const merged = `${b.title}\n${b.content}`;
-        const type = classifyIngestType(merged);
-        const domain = type === "identity" ? "core" : type;
-        const sourcePart = slugify(source ?? "ingest");
-        const uri = `${domain}://ingest/${sourcePart}/${idx + 1}-${slugify(b.title)}`;
-        return {
-          index: idx,
-          title: b.title,
-          content: b.content,
-          type,
-          uri,
-        };
+      const result = ingestText(db, {
+        text,
+        source,
+        dryRun: dry_run,
+        agentId: aid,
       });
-
-      if (dryRun) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              extracted: extracted.length,
-              written: 0,
-              skipped: extracted.length,
-              dry_run: true,
-              details: extracted.map((e) => ({ index: e.index, type: e.type, uri: e.uri, preview: e.content.slice(0, 80) })),
-            }, null, 2),
-          }],
-        };
-      }
-
-      let written = 0;
-      let skipped = 0;
-      const details: Array<Record<string, unknown>> = [];
-
-      for (const item of extracted) {
-        const result = syncOne(db, {
-          content: item.content,
-          type: item.type,
-          uri: item.uri,
-          source: `auto:${source ?? "ingest"}`,
-          agent_id: aid,
-        });
-
-        if (result.action === "added" || result.action === "updated" || result.action === "merged") {
-          written++;
-        } else {
-          skipped++;
-        }
-
-        details.push({
-          index: item.index,
-          type: item.type,
-          uri: item.uri,
-          action: result.action,
-          reason: result.reason,
-          memoryId: result.memoryId,
-        });
-      }
 
       return {
         content: [{
           type: "text" as const,
-          text: JSON.stringify({ extracted: extracted.length, written, skipped, dry_run: false, details }, null, 2),
+          text: JSON.stringify(result, null, 2),
         }],
       };
     },
@@ -696,8 +578,28 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
 
 // ── Main: run as stdio MCP server ──
 async function main() {
-  const { server } = createMcpServer();
+  const { server, db } = createMcpServer();
   const transport = new StdioServerTransport();
+
+  const autoIngestEnabled = process.env.AGENT_MEMORY_AUTO_INGEST !== "0";
+  const workspaceDir = process.env.AGENT_MEMORY_WORKSPACE ?? `${process.env.HOME ?? "."}/.openclaw/workspace`;
+  const agentId = process.env.AGENT_MEMORY_AGENT_ID ?? "default";
+  const watcher = autoIngestEnabled
+    ? runAutoIngestWatcher({
+      db,
+      workspaceDir,
+      agentId,
+    })
+    : null;
+
+  const shutdown = () => {
+    try { watcher?.close(); } catch {}
+  };
+
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  process.once("exit", shutdown);
+
   await server.connect(transport);
 }
 
