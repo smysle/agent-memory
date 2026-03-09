@@ -2,7 +2,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 const SCHEMA_SQL = `
 -- Memory entries
@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS memories (
   source        TEXT,
   agent_id      TEXT NOT NULL DEFAULT 'default',
   hash          TEXT,
+  emotion_tag   TEXT,
   UNIQUE(hash, agent_id)
 );
 
@@ -221,6 +222,11 @@ function migrateDatabase(db: Database.Database, from: number, to: number): void 
       v = 5;
       continue;
     }
+    if (v === 5) {
+      migrateV5ToV6(db);
+      v = 6;
+      continue;
+    }
     throw new Error(`Unsupported schema migration path: v${from} → v${to} (stuck at v${v})`);
   }
 }
@@ -329,6 +335,9 @@ function inferSchemaVersion(db: Database.Database): number {
   const hasMaintenanceJobs = tableExists(db, "maintenance_jobs");
   const hasFeedbackEvents = tableExists(db, "feedback_events");
 
+  const hasEmotionTag = tableHasColumn(db, "memories", "emotion_tag");
+
+  if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings && hasMaintenanceJobs && hasFeedbackEvents && hasEmotionTag) return 6;
   if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings && hasMaintenanceJobs && hasFeedbackEvents) return 5;
   if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings) return 4;
   if (hasAgentScopedPaths && hasAgentScopedLinks && hasEmbeddings) return 3;
@@ -356,6 +365,9 @@ function ensureIndexes(db: Database.Database): void {
   }
   if (tableExists(db, "maintenance_jobs")) {
     db.exec("CREATE INDEX IF NOT EXISTS idx_maintenance_jobs_phase_status ON maintenance_jobs(phase, status, started_at DESC);");
+  }
+  if (tableHasColumn(db, "memories", "emotion_tag")) {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memories_emotion_tag ON memories(emotion_tag) WHERE emotion_tag IS NOT NULL;");
   }
   if (tableExists(db, "feedback_events")) {
     db.exec("CREATE INDEX IF NOT EXISTS idx_feedback_events_memory ON feedback_events(memory_id, created_at DESC);");
@@ -498,6 +510,25 @@ function migrateV4ToV5(db: Database.Database): void {
       );
     `);
     db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'version'").run(String(5));
+    db.exec("COMMIT");
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw e;
+  }
+}
+
+function migrateV5ToV6(db: Database.Database): void {
+  // v6 adds emotion_tag column to memories table
+  if (tableHasColumn(db, "memories", "emotion_tag")) {
+    db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)").run(String(6));
+    return;
+  }
+
+  try {
+    db.exec("BEGIN");
+    db.exec("ALTER TABLE memories ADD COLUMN emotion_tag TEXT;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memories_emotion_tag ON memories(emotion_tag) WHERE emotion_tag IS NOT NULL;");
+    db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)").run(String(6));
     db.exec("COMMIT");
   } catch (e) {
     try { db.exec("ROLLBACK"); } catch {}

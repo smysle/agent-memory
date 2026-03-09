@@ -83,8 +83,14 @@ describe("Schema migration", () => {
   it("migrates v1 paths/links to v4 schema while preserving compatibility", () => {
     const v1 = createV1Database(TEST_DB);
 
-    const a = createMemory(v1 as any, { content: "A", type: "identity", agent_id: "agent-a" })!;
-    const b = createMemory(v1 as any, { content: "B", type: "identity", agent_id: "agent-b" })!;
+    // Insert directly using SQL since v1 schema doesn't have emotion_tag column
+    const ts = new Date().toISOString();
+    v1.prepare(`INSERT INTO memories (id, content, type, priority, emotion_val, vitality, stability, access_count, created_at, updated_at, agent_id, hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run("a1", "A", "identity", 0, 0, 1, 999999, 0, ts, ts, "agent-a", "hash-a");
+    v1.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run("a1", "A");
+    v1.prepare(`INSERT INTO memories (id, content, type, priority, emotion_val, vitality, stability, access_count, created_at, updated_at, agent_id, hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run("b1", "B", "identity", 0, 0, 1, 999999, 0, ts, ts, "agent-b", "hash-b");
+    v1.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run("b1", "B");
+    const a = { id: "a1" };
+    const b = { id: "b1" };;
 
     v1.prepare("INSERT INTO paths (id, memory_id, uri, alias, domain, created_at) VALUES (?,?,?,?,?,?)").run(
       "p1",
@@ -109,7 +115,11 @@ describe("Schema migration", () => {
     const db = openDatabase({ path: TEST_DB });
 
     const version = (db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined)?.value;
-    expect(version).toBe("5");
+    expect(version).toBe("6");
+
+    // v6: emotion_tag column exists
+    const memoryCols = db.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>;
+    expect(memoryCols.some((c) => c.name === "emotion_tag")).toBe(true);
 
     const embeddingsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='embeddings'").get() as { name: string } | undefined;
     const maintenanceJobsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='maintenance_jobs'").get() as { name: string } | undefined;

@@ -24,6 +24,7 @@ export interface Memory {
   source: string | null;
   agent_id: string;
   hash: string | null;
+  emotion_tag: string | null;
 }
 
 export interface CreateMemoryInput {
@@ -34,6 +35,7 @@ export interface CreateMemoryInput {
   source?: string;
   agent_id?: string;
   embedding_provider_id?: string | null;
+  emotion_tag?: string;
 }
 
 export interface UpdateMemoryInput {
@@ -45,6 +47,7 @@ export interface UpdateMemoryInput {
   stability?: number;
   source?: string;
   embedding_provider_id?: string | null;
+  emotion_tag?: string | null;
 }
 
 export function contentHash(content: string): string {
@@ -107,8 +110,8 @@ export function createMemory(db: Database.Database, input: CreateMemoryInput): M
 
   db.prepare(
     `INSERT INTO memories (id, content, type, priority, emotion_val, vitality, stability,
-     access_count, created_at, updated_at, source, agent_id, hash)
-     VALUES (?, ?, ?, ?, ?, 1.0, ?, 0, ?, ?, ?, ?, ?)`,
+     access_count, created_at, updated_at, source, agent_id, hash, emotion_tag)
+     VALUES (?, ?, ?, ?, ?, 1.0, ?, 0, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.content,
@@ -121,6 +124,7 @@ export function createMemory(db: Database.Database, input: CreateMemoryInput): M
     input.source ?? null,
     agentId,
     hash,
+    input.emotion_tag ?? null,
   );
 
   // Sync to FTS index (tokenized for CJK support)
@@ -176,6 +180,10 @@ export function updateMemory(
     fields.push("source = ?");
     values.push(input.source);
   }
+  if (input.emotion_tag !== undefined) {
+    fields.push("emotion_tag = ?");
+    values.push(input.emotion_tag);
+  }
 
   fields.push("updated_at = ?");
   values.push(now());
@@ -217,6 +225,7 @@ export function listMemories(
     min_vitality?: number;
     limit?: number;
     offset?: number;
+    emotion_tag?: string;
   },
 ): Memory[] {
   const conditions: string[] = [];
@@ -237,6 +246,10 @@ export function listMemories(
   if (opts?.min_vitality !== undefined) {
     conditions.push("vitality >= ?");
     params.push(opts.min_vitality);
+  }
+  if (opts?.emotion_tag) {
+    conditions.push("emotion_tag = ?");
+    params.push(opts.emotion_tag);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";

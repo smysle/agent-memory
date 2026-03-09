@@ -199,9 +199,10 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
       emotion_val: z.number().min(-1).max(1).default(0).describe("Emotional valence (-1 negative to +1 positive)"),
       source: z.string().optional().describe("Source annotation (e.g. session ID, date)"),
       agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
+      emotion_tag: z.string().optional().describe("Emotion label for emotion-type memories (e.g. 安心, 开心, 担心)"),
     },
-    async ({ content, type, uri, emotion_val, source, agent_id }) => {
-      const result = await rememberMemory(db, { content, type, uri, emotion_val, source, agent_id: agent_id ?? aid });
+    async ({ content, type, uri, emotion_val, source, agent_id, emotion_tag }) => {
+      const result = await rememberMemory(db, { content, type, uri, emotion_val, source, agent_id: agent_id ?? aid, emotion_tag });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
   );
@@ -213,9 +214,10 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
       query: z.string().describe("Search query (natural language)"),
       limit: z.number().default(10).describe("Max results to return"),
       agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
+      emotion_tag: z.string().optional().describe("Filter results by emotion tag (e.g. 安心, 开心)"),
     },
-    async ({ query, limit, agent_id }) => {
-      const result = await recallMemory(db, { query, limit, agent_id: agent_id ?? aid });
+    async ({ query, limit, agent_id, emotion_tag }) => {
+      const result = await recallMemory(db, { query, limit, agent_id: agent_id ?? aid, emotion_tag });
       return { content: [{ type: "text" as const, text: JSON.stringify(formatRecallPayload(result), null, 2) }] };
     },
   );
@@ -269,19 +271,20 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
     "Load startup memories. Default output is narrative markdown; pass format=json for legacy output.",
     {
       format: z.enum(["narrative", "json"]).default("narrative").optional(),
+      agent_name: z.string().optional().describe("Agent name for narrative header (default: Agent)"),
     },
-    async ({ format }) => {
+    async ({ format, agent_name }) => {
       const outputFormat = format ?? "narrative";
-      const base = boot(db, { agent_id: aid });
+      const result = boot(db, { agent_id: aid, format: outputFormat, agent_name: agent_name ?? undefined });
 
       if (outputFormat === "json") {
         return {
           content: [{
             type: "text" as const,
             text: JSON.stringify({
-              count: base.identityMemories.length,
-              bootPaths: base.bootPaths,
-              memories: base.identityMemories.map((memory) => ({
+              count: result.identityMemories.length,
+              bootPaths: result.bootPaths,
+              memories: result.identityMemories.map((memory) => ({
                 id: memory.id,
                 content: memory.content,
                 type: memory.type,
@@ -292,13 +295,19 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
         };
       }
 
+      // Use the new warm boot narrative from boot.ts
+      if (result.narrative) {
+        return { content: [{ type: "text" as const, text: result.narrative }] };
+      }
+
+      // Fallback to legacy narrative
       const identity = listMemories(db, { agent_id: aid, type: "identity", limit: 12 });
       const emotion = listMemories(db, { agent_id: aid, type: "emotion", min_vitality: 0.1, limit: 12 }).sort((a, b) => b.vitality - a.vitality);
       const knowledge = listMemories(db, { agent_id: aid, type: "knowledge", min_vitality: 0.1, limit: 16 }).sort((a, b) => b.vitality - a.vitality);
       const event = listMemories(db, { agent_id: aid, type: "event", min_vitality: 0.0, limit: 24 }).sort((a, b) => b.vitality - a.vitality);
       const stats = countMemories(db, aid);
 
-      return { content: [{ type: "text" as const, text: formatWarmBootNarrative(identity.length > 0 ? identity : base.identityMemories, emotion, knowledge, event, stats) }] };
+      return { content: [{ type: "text" as const, text: formatWarmBootNarrative(identity.length > 0 ? identity : result.identityMemories, emotion, knowledge, event, stats) }] };
     },
   );
 

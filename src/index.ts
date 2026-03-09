@@ -113,7 +113,15 @@ export { calculateVitality, runDecay, getDecayedMemories } from "./sleep/decay.j
 export { syncOne, syncBatch, type SyncInput, type SyncResult } from "./sleep/sync.js";
 export { runTidy, type TidyResult } from "./sleep/tidy.js";
 export { runGovern, rankEvictionCandidates, computeEvictionScore, type GovernResult, type EvictionCandidate } from "./sleep/govern.js";
-export { boot, type BootResult } from "./sleep/boot.js";
+export {
+  boot,
+  formatRelativeDate,
+  loadWarmBootLayers,
+  formatNarrativeBoot,
+  type BootResult,
+  type WarmBootOptions,
+  type WarmBootResult,
+} from "./sleep/boot.js";
 export {
   createMaintenanceJob,
   getMaintenanceJob,

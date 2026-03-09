@@ -6,7 +6,9 @@ import { openDatabase } from "../core/db.js";
 import { type MemoryType } from "../core/memory.js";
 import { exportMemories } from "../core/export.js";
 import { boot } from "../sleep/boot.js";
+import { surfaceMemories } from "../app/surface.js";
 import { startHttpServer } from "../transports/http.js";
+import { writeFileSync } from "fs";
 import { rememberMemory } from "../app/remember.js";
 import { recallMemory } from "../app/recall.js";
 import { getMemoryStatus } from "../app/status.js";
@@ -33,9 +35,10 @@ Usage: agent-memory <command> [options]
 Commands:
   init                               Create database
   db:migrate                         Run schema migrations (no-op if up-to-date)
-  remember <content> [--uri X] [--type T]  Store a memory
-  recall <query> [--limit N]         Search memories (hybrid retrieval, auto-fallback to BM25)
-  boot                               Load identity memories
+  remember <content> [--uri X] [--type T] [--emotion-tag TAG]  Store a memory
+  recall <query> [--limit N] [--emotion-tag TAG]  Search memories (hybrid retrieval)
+  boot [--format json|narrative] [--agent-name NAME]  Load identity memories
+  surface [--out FILE] [--days N] [--limit N]  Export recent memories as Markdown
   status                             Show statistics
   reflect [decay|tidy|govern|all]    Run sleep cycle
   reindex [--full] [--batch-size N]  Rebuild FTS index and embeddings (if configured)
@@ -104,12 +107,14 @@ async function main() {
         const db = openDatabase({ path: getDbPath() });
         const uri = getFlag("--uri");
         const type = (getFlag("--type") ?? "knowledge") as MemoryType;
+        const emotionTag = getFlag("--emotion-tag");
         const result = await rememberMemory(db, {
           content,
           type,
           uri,
           source: "manual",
           agent_id: getAgentId(),
+          emotion_tag: emotionTag,
         });
         console.log(`${result.action}: ${result.reason}${result.memoryId ? ` (${result.memoryId.slice(0, 8)})` : ""}`);
         db.close();
@@ -123,10 +128,12 @@ async function main() {
           process.exit(1);
         }
         const db = openDatabase({ path: getDbPath() });
+        const emotionTag = getFlag("--emotion-tag");
         const result = await recallMemory(db, {
           query,
           agent_id: getAgentId(),
           limit: Number.parseInt(getFlag("--limit") ?? "10", 10),
+          emotion_tag: emotionTag,
         });
 
         console.log(`🔍 Results: ${result.results.length} (${result.mode})\n`);
@@ -145,14 +152,90 @@ async function main() {
 
       case "boot": {
         const db = openDatabase({ path: getDbPath() });
-        const result = boot(db, { agent_id: getAgentId() });
-        console.log(`🧠 Boot: ${result.identityMemories.length} identity memories loaded\n`);
-        for (const memory of result.identityMemories) {
-          console.log(`  🔴 ${memory.content.slice(0, 100)}`);
+        const format = (getFlag("--format") ?? "narrative") as "json" | "narrative";
+        const agentName = getFlag("--agent-name") ?? "Agent";
+        const result = boot(db, { agent_id: getAgentId(), format, agent_name: agentName });
+        if (format === "narrative" && result.narrative) {
+          console.log(result.narrative);
+        } else {
+          console.log(`🧠 Boot: ${result.identityMemories.length} identity memories loaded\n`);
+          for (const memory of result.identityMemories) {
+            console.log(`  🔴 ${memory.content.slice(0, 100)}`);
+          }
+          if (result.bootPaths.length) {
+            console.log(`\n📍 Boot paths: ${result.bootPaths.join(", ")}`);
+          }
         }
-        if (result.bootPaths.length) {
-          console.log(`\n📍 Boot paths: ${result.bootPaths.join(", ")}`);
+        db.close();
+        break;
+      }
+
+      case "surface": {
+        const db = openDatabase({ path: getDbPath() });
+        const days = Number.parseInt(getFlag("--days") ?? "7", 10);
+        const limit = Number.parseInt(getFlag("--limit") ?? "50", 10);
+        const minVitality = Number.parseFloat(getFlag("--min-vitality") ?? "0.1");
+        const outFile = getFlag("--out");
+        const typesRaw = getFlag("--types");
+        const types = typesRaw ? typesRaw.split(",").map((t) => t.trim()) as MemoryType[] : undefined;
+
+        const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+
+        const surfaceResult = await surfaceMemories(db, {
+          task: "context loading",
+          intent: "temporal",
+          agent_id: getAgentId(),
+          types,
+          limit: Math.max(limit, 100), // fetch more, filter by date after
+          min_vitality: minVitality,
+        });
+
+        // Filter by date window
+        const filtered = surfaceResult.results
+          .filter((r) => r.memory.updated_at >= cutoff)
+          .slice(0, limit);
+
+        // Group by type
+        const grouped: Record<string, typeof filtered> = {};
+        for (const r of filtered) {
+          const t = r.memory.type;
+          if (!grouped[t]) grouped[t] = [];
+          grouped[t].push(r);
         }
+
+        const { formatRelativeDate } = await import("../sleep/boot.js");
+        const lines: string[] = [];
+        lines.push("# Recent Memories");
+        lines.push("");
+        lines.push(`> Auto-generated by AgentMemory surface. Last updated: ${new Date().toISOString()}`);
+        lines.push("");
+
+        const typeOrder: MemoryType[] = ["identity", "emotion", "knowledge", "event"];
+        const typeLabels: Record<string, string> = { identity: "Identity", emotion: "Emotion", knowledge: "Knowledge", event: "Events" };
+
+        for (const t of typeOrder) {
+          const items = grouped[t];
+          if (!items?.length) continue;
+          lines.push(`## ${typeLabels[t]}`);
+          for (const item of items) {
+            const content = item.memory.content.split("\n")[0].slice(0, 200);
+            const time = formatRelativeDate(item.memory.updated_at);
+            const tag = (item.memory as typeof item.memory & { emotion_tag?: string }).emotion_tag;
+            const meta = t === "emotion" && tag ? `(${tag}, ${time})` : `(${time})`;
+            lines.push(`- ${content} ${meta}`);
+          }
+          lines.push("");
+        }
+
+        const markdown = lines.join("\n");
+
+        if (outFile) {
+          writeFileSync(outFile, markdown, "utf-8");
+          console.log(`✅ Surface: ${filtered.length} memories written to ${outFile}`);
+        } else {
+          console.log(markdown);
+        }
+
         db.close();
         break;
       }

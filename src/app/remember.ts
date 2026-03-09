@@ -13,6 +13,7 @@ export interface RememberInput {
   agent_id?: string;
   provider?: EmbeddingProvider | null;
   conservative?: boolean;
+  emotion_tag?: string;
 }
 
 export async function rememberMemory(
@@ -29,5 +30,6 @@ export async function rememberMemory(
     agent_id: input.agent_id,
     provider: input.provider,
     conservative: input.conservative,
+    emotion_tag: input.emotion_tag,
   });
 }

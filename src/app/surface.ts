@@ -20,6 +20,7 @@ export interface SurfaceInput {
   agent_id?: string;
   provider?: EmbeddingProvider | null;
   min_vitality?: number;
+  emotion_tag?: string;
 }
 
 export interface SurfaceResult {
@@ -303,6 +304,7 @@ export async function surfaceMemories(
     .map((signal) => signal.memory)
     .filter((memory) => memory.vitality >= minVitality)
     .filter((memory) => (input.types?.length ? input.types.includes(memory.type) : true))
+    .filter((memory) => (input.emotion_tag ? (memory as typeof memory & { emotion_tag?: string }).emotion_tag === input.emotion_tag : true))
     .map((memory) => {
       const signal = signals.get(memory.id) ?? { memory };
       const memoryTokens = new Set(tokenize(memory.content));

@@ -16,6 +16,7 @@ export interface SyncInput {
   agent_id?: string;
   provider?: EmbeddingProvider | null;
   conservative?: boolean;
+  emotion_tag?: string;
 }
 
 export interface SyncResult {
@@ -53,6 +54,7 @@ export async function syncOne(db: Database.Database, input: SyncInput): Promise<
     uri: input.uri,
     provider: input.provider,
     conservative: input.conservative,
+    emotion_tag: input.emotion_tag,
   };
 
   const guardResult = await guard(db, memInput);
