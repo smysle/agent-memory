@@ -1,0 +1,10 @@
+{
+  "agent_id": "http-demo",
+  "task": "Draft a weekly update for Alice",
+  "recent_turns": [
+    "We need to send Alice the sprint summary.",
+    "Keep it short and put action items first."
+  ],
+  "intent": "planning",
+  "limit": 5
+}

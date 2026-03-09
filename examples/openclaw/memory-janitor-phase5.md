@@ -11,7 +11,7 @@
   ```
   Note: the npm scope is `@smyslenny` while the GitHub repo is `smysle/agent-memory` — both refer to the same project.
 - **A memory janitor cron job** — a periodic AI cron that maintains your flat-file memory store.
-  See `examples/memory-tidy-prompt.txt` for a full example prompt, and `examples/openclaw-setup.md` for how to schedule it with OpenClaw.
+  See `examples/openclaw/memory-tidy-prompt.txt` for a full example prompt, and `examples/openclaw/openclaw-setup.md` for how to schedule it with OpenClaw.
 - **A canonical memory file** (optional) — a human-reviewed long-term summary file
   (e.g. `MEMORY.md`, `profile.md`, or any file you manually curate). Only needed for Phase 5.2.
   If you don't have one, skip Phase 5.2 entirely — Phase 5.1 (decay) runs standalone.

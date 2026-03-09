@@ -1,7 +1,7 @@
 {
   "name": "@smyslenny/agent-memory",
   "version": "4.0.0-alpha.1",
-  "description": "Structured memory companion for AI agents — journal-derived ingest, BM25 recall, Ebbinghaus decay, and MCP tools.",
+  "description": "Agent-native memory layer with lifecycle management for AI agents — SQLite-first, Write Guard, hybrid recall, MCP, CLI, and HTTP API.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -32,7 +32,13 @@
     "sleep-cycle",
     "ebbinghaus",
     "sqlite",
-    "typescript"
+    "typescript",
+    "http-api",
+    "semantic-search",
+    "vector-search",
+    "hybrid-search",
+    "memory-layer",
+    "agent-runtime"
   ],
   "author": "smysle",
   "license": "MIT",
@@ -57,5 +63,6 @@
     "tsx": "^4.21.0",
     "typescript": "^5.7.3",
     "vitest": "^3.0.5"
-  }
+  },
+  "homepage": "https://github.com/smysle/agent-memory"
 }

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "agent-memory": {
+      "command": "node",
+      "args": ["./node_modules/@smyslenny/agent-memory/dist/mcp/server.js"],
+      "env": {
+        "AGENT_MEMORY_DB": "./agent-memory.db",
+        "AGENT_MEMORY_AGENT_ID": "mcp-demo",
+        "AGENT_MEMORY_AUTO_INGEST": "0"
+      }
+    }
+  }
+}

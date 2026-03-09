@@ -32,7 +32,7 @@ openclaw cron add \
   --session isolated \
   --no-deliver \
   --timeout-seconds 300 \
-  --message "$(cat memory-sync-prompt.txt)"
+  --message "$(cat examples/openclaw/memory-sync-prompt.txt)"
 ```
 
 ### memory-tidy (Deep Sleep) — 03:00 daily
@@ -46,7 +46,7 @@ openclaw cron add \
   --announce \
   --best-effort-deliver \
   --timeout-seconds 600 \
-  --message "$(cat memory-tidy-prompt.txt)"
+  --message "$(cat examples/openclaw/memory-tidy-prompt.txt)"
 ```
 
 ## Semantic Search (qmd)
@@ -85,7 +85,7 @@ A typical janitor runs 2–4x per day and executes phases like:
 - Deduplicate repeated entries
 - Distill important facts into a long-term summary file (e.g. `MEMORY.md` or any canonical memory file you maintain)
 
-See `examples/memory-tidy-prompt.txt` in this repo for a full example prompt, and the cron setup above for how to schedule it.
+See `examples/openclaw/memory-tidy-prompt.txt` in this repo for a full example prompt, and the cron setup above for how to schedule it.
 
 ### Adding agent-memory integration to your janitor
 
@@ -105,7 +105,7 @@ Agents that maintain both `agent-memory` and a separate canonical memory file wi
 
 #### How to add this to your janitor prompt
 
-Append the Phase 5 template from `examples/memory-janitor-phase5.md` to your existing janitor prompt. It covers:
+Append the Phase 5 template from `examples/openclaw/memory-janitor-phase5.md` to your existing janitor prompt. It covers:
 1. Triggering decay via `agent-memory_reflect`
 2. Running a consistency check between `agent-memory` and your canonical memory file
 3. Reporting results
