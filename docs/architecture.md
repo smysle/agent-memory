@@ -1,5 +1,9 @@
 # Architecture Overview
 
+<p align="center">
+  <img src="assets/architecture-diagram.jpg" alt="AgentMemory Architecture" width="800" />
+</p>
+
 AgentMemory v4 is a **SQLite-first, agent-native memory layer** with three
 independent but connected paths:
 

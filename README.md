@@ -1,11 +1,17 @@
-# 🧠 AgentMemory
+<p align="center">
+  <img src="docs/assets/banner.jpg" alt="AgentMemory" width="800" />
+</p>
 
-> Agent-native memory layer with lifecycle management for AI agents.
+<p align="center">
+  <strong>Agent-native memory layer with lifecycle management for AI agents.</strong>
+</p>
 
-[![npm](https://img.shields.io/npm/v/@smyslenny/agent-memory)](https://www.npmjs.com/package/@smyslenny/agent-memory)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A518-green.svg)](https://nodejs.org/)
-[![MCP](https://img.shields.io/badge/MCP-10_tools-orange.svg)](https://modelcontextprotocol.io/)
+<p align="center">
+  <a href="https://www.npmjs.com/package/@smyslenny/agent-memory"><img src="https://img.shields.io/npm/v/@smyslenny/agent-memory" alt="npm" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-%E2%89%A518-green.svg" alt="Node.js" /></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-10_tools-orange.svg" alt="MCP" /></a>
+</p>
 
 **English** | [简体中文说明](docs/README-zh.md)
 
