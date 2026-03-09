@@ -1,4 +1,4 @@
-// AgentMemory v3 — MCP Server (9 tools)
+// AgentMemory v4 — MCP Server (10 tools)
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -13,6 +13,7 @@ import {
 } from "../core/memory.js";
 import { getPathByUri, getPathsByPrefix } from "../core/path.js";
 import { searchBM25 } from "../search/bm25.js";
+import { recallMemories, reindexMemorySearch } from "../search/hybrid.js";
 import { syncOne } from "../sleep/sync.js";
 import { runDecay } from "../sleep/decay.js";
 import { runTidy } from "../sleep/tidy.js";
@@ -198,7 +199,7 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
 
   const server = new McpServer({
     name: "agent-memory",
-    version: "3.0.0",
+    version: "4.0.0-alpha.1",
   });
 
   // ── Tool 1: remember ──
@@ -223,34 +224,25 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
   // ── Tool 2: recall ──
   server.tool(
     "recall",
-    "Search memories using BM25 full-text retrieval with inline priority×vitality weighting.",
+    "Search memories using optional hybrid retrieval (BM25 + vector). Falls back to BM25-only when no embedding provider is configured.",
     {
       query: z.string().describe("Search query (natural language)"),
       limit: z.number().default(10).describe("Max results to return"),
     },
     async ({ query, limit }) => {
-      const expandedLimit = Math.max(limit * 2, limit);
-      const raw = searchBM25(db, query, { agent_id: aid, limit: expandedLimit });
-
-      const scored = raw
-        .map((r) => {
-          const weight = PRIORITY_WEIGHT[r.memory.priority] ?? 1.0;
-          const vitality = Math.max(0.1, r.memory.vitality);
-          return {
-            memory: r.memory,
-            score: r.score * weight * vitality,
-          };
-        })
-        .sort((a, b) => b.score - a.score)
-        .slice(0, limit);
-
-      for (const r of scored) {
-        recordAccess(db, r.memory.id);
-      }
+      const recall = await recallMemories(db, query, { agent_id: aid, limit });
 
       const output = {
-        count: scored.length,
-        memories: scored.map((r) => formatMemory(r.memory, r.score)),
+        mode: recall.mode,
+        provider_id: recall.providerId,
+        count: recall.results.length,
+        memories: recall.results.map((result) => ({
+          ...formatMemory(result.memory, result.score),
+          bm25_rank: result.bm25_rank,
+          vector_rank: result.vector_rank,
+          bm25_score: result.bm25_score,
+          vector_score: result.vector_score,
+        })),
       };
 
       return { content: [{ type: "text" as const, text: JSON.stringify(output, null, 2) }] };
@@ -508,7 +500,31 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
     },
   );
 
-  // ── Tool 9: surface ──
+  // ── Tool 9: reindex ──
+  server.tool(
+    "reindex",
+    "Rebuild BM25 index and (optionally) embedding vectors for the current agent.",
+    {
+      full: z.boolean().default(false).optional().describe("Force full embedding rebuild instead of incremental backfill"),
+      batch_size: z.number().min(1).max(128).default(16).optional().describe("Embedding batch size for reindex"),
+    },
+    async ({ full, batch_size }) => {
+      const result = await reindexMemorySearch(db, {
+        agent_id: aid,
+        force: full ?? false,
+        batchSize: batch_size ?? 16,
+      });
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify(result, null, 2),
+        }],
+      };
+    },
+  );
+
+  // ── Tool 10: surface ──
   server.tool(
     "surface",
     "Lightweight readonly memory surfacing: keyword OR search + priority×vitality×hitRatio ranking (no access recording).",

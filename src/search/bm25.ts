@@ -1,11 +1,12 @@
 // AgentMemory v2 — BM25 full-text search via SQLite FTS5
 import type Database from "better-sqlite3";
 import type { Memory } from "../core/memory.js";
-import { tokenize } from "./tokenizer.js";
+import { tokenize, tokenizeForIndex } from "./tokenizer.js";
 
 export interface SearchResult {
   memory: Memory;
   score: number;
+  rank: number;
   matchReason: string;
 }
 
@@ -43,11 +44,12 @@ export function searchBM25(
       )
       .all(ftsQuery, agentId, minVitality, limit) as Array<Memory & { score: number }>;
 
-    return rows.map((row) => {
+    return rows.map((row, index) => {
       const { score: _score, ...memoryFields } = row;
       return {
         memory: memoryFields as Memory,
         score: Math.abs(row.score), // FTS5 rank is negative (lower = better)
+        rank: index + 1,
         matchReason: "bm25",
       };
     });
@@ -76,9 +78,10 @@ function searchSimple(
     )
     .all(agentId, minVitality, `%${query}%`, limit) as Memory[];
 
-  return rows.map((m, i) => ({
-    memory: m,
-    score: 1.0 / (i + 1), // Simple rank by position
+  return rows.map((memory, index) => ({
+    memory,
+    score: 1.0 / (index + 1),
+    rank: index + 1,
     matchReason: "like",
   }));
 }
@@ -87,10 +90,38 @@ function searchSimple(
  * Build FTS5 query from natural language.
  * Uses jieba for Chinese word segmentation, falls back to bigram splitting.
  */
-function buildFtsQuery(text: string): string | null {
+export function buildFtsQuery(text: string): string | null {
   const tokens = tokenize(text);
   if (tokens.length === 0) return null;
 
   // Use OR for broad matching
   return tokens.map((w) => `"${w}"`).join(" OR ");
+}
+
+export function rebuildBm25Index(
+  db: Database.Database,
+  opts?: { agent_id?: string },
+): { reindexed: number } {
+  const memories = opts?.agent_id
+    ? db.prepare("SELECT id, content FROM memories WHERE agent_id = ?").all(opts.agent_id) as Array<{ id: string; content: string }>
+    : db.prepare("SELECT id, content FROM memories").all() as Array<{ id: string; content: string }>;
+
+  const insert = db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)");
+  const deleteOne = db.prepare("DELETE FROM memories_fts WHERE id = ?");
+
+  const transaction = db.transaction(() => {
+    if (!opts?.agent_id) {
+      db.exec("DELETE FROM memories_fts");
+    }
+
+    for (const memory of memories) {
+      if (opts?.agent_id) {
+        deleteOne.run(memory.id);
+      }
+      insert.run(memory.id, tokenizeForIndex(memory.content));
+    }
+  });
+
+  transaction();
+  return { reindexed: memories.length };
 }

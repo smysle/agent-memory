@@ -80,7 +80,7 @@ afterEach(() => {
 });
 
 describe("Schema migration", () => {
-  it("migrates v1 paths/links to v3 schema while preserving compatibility", () => {
+  it("migrates v1 paths/links to v4 schema while preserving compatibility", () => {
     const v1 = createV1Database(TEST_DB);
 
     const a = createMemory(v1 as any, { content: "A", type: "identity", agent_id: "agent-a" })!;
@@ -109,7 +109,7 @@ describe("Schema migration", () => {
     const db = openDatabase({ path: TEST_DB });
 
     const version = (db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined)?.value;
-    expect(version).toBe("3");
+    expect(version).toBe("4");
 
     const embeddingsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='embeddings'").get() as { name: string } | undefined;
     const linksTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='links'").get() as { name: string } | undefined;
@@ -120,6 +120,10 @@ describe("Schema migration", () => {
 
     const cols = db.prepare("PRAGMA table_info(paths)").all() as Array<{ name: string }>;
     expect(cols.some((c) => c.name === "agent_id")).toBe(true);
+
+    const embeddingCols = db.prepare("PRAGMA table_info(embeddings)").all() as Array<{ name: string }>;
+    expect(embeddingCols.some((c) => c.name === "provider_id")).toBe(true);
+    expect(embeddingCols.some((c) => c.name === "status")).toBe(true);
 
     const migratedPath = getPathByUri(db, "core://user/name", "agent-a");
     expect(migratedPath?.agent_id).toBe("agent-a");

@@ -42,6 +42,40 @@ describe("AgentMemory Core", () => {
     expect(m2).toBeNull();
   });
 
+  it("marks embeddings dirty when a provider is configured", () => {
+    const previous = {
+      provider: process.env.AGENT_MEMORY_EMBEDDING_PROVIDER,
+      baseUrl: process.env.AGENT_MEMORY_EMBEDDING_BASE_URL,
+      apiKey: process.env.AGENT_MEMORY_EMBEDDING_API_KEY,
+      model: process.env.AGENT_MEMORY_EMBEDDING_MODEL,
+      dimension: process.env.AGENT_MEMORY_EMBEDDING_DIMENSION,
+    };
+
+    try {
+      process.env.AGENT_MEMORY_EMBEDDING_PROVIDER = "openai-compatible";
+      process.env.AGENT_MEMORY_EMBEDDING_BASE_URL = "https://api.example.com/v1";
+      process.env.AGENT_MEMORY_EMBEDDING_API_KEY = "secret";
+      process.env.AGENT_MEMORY_EMBEDDING_MODEL = "text-embedding-3-small";
+      process.env.AGENT_MEMORY_EMBEDDING_DIMENSION = "2";
+
+      const memory = createMemory(db, { content: "remember this preference", type: "knowledge" })!;
+      const row = db.prepare("SELECT status, content_hash FROM embeddings WHERE memory_id = ?").get(memory.id) as { status: string; content_hash: string } | undefined;
+      expect(row?.status).toBe("pending");
+      expect(row?.content_hash).toBe(memory.hash);
+    } finally {
+      if (previous.provider === undefined) delete process.env.AGENT_MEMORY_EMBEDDING_PROVIDER;
+      else process.env.AGENT_MEMORY_EMBEDDING_PROVIDER = previous.provider;
+      if (previous.baseUrl === undefined) delete process.env.AGENT_MEMORY_EMBEDDING_BASE_URL;
+      else process.env.AGENT_MEMORY_EMBEDDING_BASE_URL = previous.baseUrl;
+      if (previous.apiKey === undefined) delete process.env.AGENT_MEMORY_EMBEDDING_API_KEY;
+      else process.env.AGENT_MEMORY_EMBEDDING_API_KEY = previous.apiKey;
+      if (previous.model === undefined) delete process.env.AGENT_MEMORY_EMBEDDING_MODEL;
+      else process.env.AGENT_MEMORY_EMBEDDING_MODEL = previous.model;
+      if (previous.dimension === undefined) delete process.env.AGENT_MEMORY_EMBEDDING_DIMENSION;
+      else process.env.AGENT_MEMORY_EMBEDDING_DIMENSION = previous.dimension;
+    }
+  });
+
   it("updates and deletes memory", () => {
     const mem = createMemory(db, { content: "old", type: "knowledge" })!;
     const updated = updateMemory(db, mem.id, { content: "new" });

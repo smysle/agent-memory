@@ -1,8 +1,8 @@
-// AgentMemory v2 — SQLite database initialization and schema
+// AgentMemory v4 — SQLite database initialization and schema
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const SCHEMA_SQL = `
 -- Memory entries
@@ -66,14 +66,14 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
 
 -- Embeddings (optional semantic layer)
 CREATE TABLE IF NOT EXISTS embeddings (
-  agent_id    TEXT NOT NULL DEFAULT 'default',
-  memory_id   TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
-  model       TEXT NOT NULL,
-  dim         INTEGER NOT NULL,
-  vector      BLOB NOT NULL,
-  created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL,
-  PRIMARY KEY (agent_id, memory_id, model)
+  id           TEXT PRIMARY KEY,
+  memory_id    TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  provider_id  TEXT NOT NULL,
+  vector       BLOB,
+  content_hash TEXT NOT NULL,
+  status       TEXT NOT NULL CHECK(status IN ('pending','ready','failed')),
+  created_at   TEXT NOT NULL,
+  UNIQUE(memory_id, provider_id)
 );
 
 -- Schema version tracking
@@ -154,6 +154,15 @@ function getSchemaVersion(db: Database.Database): number | null {
   }
 }
 
+function tableExists(db: Database.Database, table: string): boolean {
+  try {
+    const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(table) as { name: string } | undefined;
+    return Boolean(row?.name);
+  } catch {
+    return false;
+  }
+}
+
 function tableHasColumn(db: Database.Database, table: string, column: string): boolean {
   try {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
@@ -174,6 +183,11 @@ function migrateDatabase(db: Database.Database, from: number, to: number): void 
     if (v === 2) {
       migrateV2ToV3(db);
       v = 3;
+      continue;
+    }
+    if (v === 3) {
+      migrateV3ToV4(db);
+      v = 4;
       continue;
     }
     throw new Error(`Unsupported schema migration path: v${from} → v${to} (stuck at v${v})`);
@@ -275,14 +289,14 @@ function inferSchemaVersion(db: Database.Database): number {
   // Best-effort inference for databases created without schema_meta.
   const hasAgentScopedPaths = tableHasColumn(db, "paths", "agent_id");
   const hasAgentScopedLinks = tableHasColumn(db, "links", "agent_id");
-  const hasEmbeddings = (() => {
-    try {
-      const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='embeddings'").get() as { name: string } | undefined;
-      return Boolean(row);
-    } catch {
-      return false;
-    }
-  })();
+  const hasEmbeddings = tableExists(db, "embeddings");
+  const hasV4Embeddings = hasEmbeddings
+    && tableHasColumn(db, "embeddings", "provider_id")
+    && tableHasColumn(db, "embeddings", "status")
+    && tableHasColumn(db, "embeddings", "content_hash")
+    && tableHasColumn(db, "embeddings", "id");
+
+  if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings) return 4;
   if (hasAgentScopedPaths && hasAgentScopedLinks && hasEmbeddings) return 3;
   if (hasAgentScopedPaths && hasAgentScopedLinks) return 2;
   return 1;
@@ -297,14 +311,14 @@ function ensureIndexes(db: Database.Database): void {
     db.exec("CREATE INDEX IF NOT EXISTS idx_links_agent_source ON links(agent_id, source_id);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_links_agent_target ON links(agent_id, target_id);");
   }
-  try {
-    const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='embeddings'").get() as { name: string } | undefined;
-    if (row) {
+  if (tableExists(db, "embeddings")) {
+    if (tableHasColumn(db, "embeddings", "provider_id")) {
+      db.exec("CREATE INDEX IF NOT EXISTS idx_embeddings_provider_status ON embeddings(provider_id, status);");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_embeddings_memory_provider ON embeddings(memory_id, provider_id);");
+    } else {
       db.exec("CREATE INDEX IF NOT EXISTS idx_embeddings_agent_model ON embeddings(agent_id, model);");
       db.exec("CREATE INDEX IF NOT EXISTS idx_embeddings_memory ON embeddings(memory_id);");
     }
-  } catch {
-    // ignore
   }
 }
 
@@ -326,6 +340,63 @@ function migrateV2ToV3(db: Database.Database): void {
       );
     `);
     db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'version'").run(String(3));
+    db.exec("COMMIT");
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw e;
+  }
+}
+
+function migrateV3ToV4(db: Database.Database): void {
+  const alreadyMigrated = tableHasColumn(db, "embeddings", "provider_id")
+    && tableHasColumn(db, "embeddings", "status")
+    && tableHasColumn(db, "embeddings", "content_hash")
+    && tableHasColumn(db, "embeddings", "id");
+
+  if (alreadyMigrated) {
+    db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'version'").run(String(4));
+    return;
+  }
+
+  try {
+    db.exec("BEGIN");
+
+    const legacyRows = tableExists(db, "embeddings")
+      ? db.prepare(
+        `SELECT e.agent_id, e.memory_id, e.model, e.vector, e.created_at, m.hash
+         FROM embeddings e
+         LEFT JOIN memories m ON m.id = e.memory_id`,
+      ).all() as Array<{ agent_id: string; memory_id: string; model: string; vector: Buffer; created_at: string; hash: string | null }>
+      : [];
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS embeddings_v4 (
+        id           TEXT PRIMARY KEY,
+        memory_id    TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        provider_id  TEXT NOT NULL,
+        vector       BLOB,
+        content_hash TEXT NOT NULL,
+        status       TEXT NOT NULL CHECK(status IN ('pending','ready','failed')),
+        created_at   TEXT NOT NULL,
+        UNIQUE(memory_id, provider_id)
+      );
+    `);
+
+    const insert = db.prepare(
+      `INSERT INTO embeddings_v4 (id, memory_id, provider_id, vector, content_hash, status, created_at)
+       VALUES (?, ?, ?, ?, ?, 'ready', ?)`,
+    );
+
+    for (const row of legacyRows) {
+      insert.run(newId(), row.memory_id, `legacy:${row.agent_id}:${row.model}`, row.vector, row.hash ?? "", row.created_at);
+    }
+
+    if (tableExists(db, "embeddings")) {
+      db.exec("DROP TABLE embeddings;");
+    }
+    db.exec("ALTER TABLE embeddings_v4 RENAME TO embeddings;");
+
+    db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'version'").run(String(4));
     db.exec("COMMIT");
   } catch (e) {
     try { db.exec("ROLLBACK"); } catch {}

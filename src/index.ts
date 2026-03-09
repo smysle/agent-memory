@@ -1,4 +1,4 @@
-// AgentMemory v3 — Main library entry point
+// AgentMemory v4 — Main library entry point
 
 // Core
 export { openDatabase, isCountRow, type DbOptions } from "./core/db.js";
@@ -15,7 +15,51 @@ export { guard, type GuardResult, type GuardAction } from "./core/guard.js";
 export { exportMemories, type ExportResult } from "./core/export.js";
 
 // Search
-export { searchBM25, type SearchResult } from "./search/bm25.js";
+export { searchBM25, buildFtsQuery, rebuildBm25Index, type SearchResult } from "./search/bm25.js";
+export {
+  recallMemories,
+  reindexEmbeddings,
+  reindexMemorySearch,
+  fuseHybridResults,
+  fusionScore,
+  priorityPrior,
+  type HybridRecallResult,
+  type HybridRecallResponse,
+  type ReindexEmbeddingsResult,
+  type ReindexSearchResult,
+} from "./search/hybrid.js";
+export {
+  createOpenAICompatibleEmbeddingProvider,
+  createLocalHttpEmbeddingProvider,
+  type EmbeddingProvider,
+  type EmbeddingProviderOptions,
+} from "./search/embedding.js";
+export {
+  createEmbeddingProvider,
+  getEmbeddingProvider,
+  getEmbeddingProviderFromEnv,
+  getEmbeddingProviderConfigFromEnv,
+  getConfiguredEmbeddingProviderId,
+  healthcheckEmbeddingProvider,
+  type EmbeddingProviderConfig,
+  type EmbeddingProviderKind,
+} from "./search/providers.js";
+export {
+  encodeVector,
+  decodeVector,
+  cosineSimilarity,
+  getEmbedding,
+  markMemoryEmbeddingPending,
+  markAllEmbeddingsPending,
+  upsertReadyEmbedding,
+  markEmbeddingFailed,
+  listPendingEmbeddings,
+  searchByVector,
+  type EmbeddingStatus,
+  type StoredEmbedding,
+  type VectorSearchResult,
+  type PendingEmbeddingRecord,
+} from "./search/vector.js";
 export { tokenize } from "./search/tokenizer.js";
 
 // Ingest

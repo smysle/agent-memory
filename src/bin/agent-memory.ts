@@ -1,10 +1,9 @@
 #!/usr/bin/env node
-// AgentMemory v3 — CLI
+// AgentMemory v4 — CLI
 import { openDatabase } from "../core/db.js";
 import { countMemories } from "../core/memory.js";
 import { exportMemories } from "../core/export.js";
-import { tokenizeForIndex } from "../search/tokenizer.js";
-import { searchBM25 } from "../search/bm25.js";
+import { recallMemories, reindexMemorySearch } from "../search/hybrid.js";
 import { boot } from "../sleep/boot.js";
 import { runDecay } from "../sleep/decay.js";
 import { runTidy } from "../sleep/tidy.js";
@@ -27,7 +26,7 @@ function getAgentId(): string {
 
 function printHelp() {
   console.log(`
-🧠 AgentMemory v3 — Sleep-cycle memory for AI agents
+🧠 AgentMemory v4 — Sleep-cycle memory for AI agents
 
 Usage: agent-memory <command> [options]
 
@@ -35,11 +34,11 @@ Commands:
   init                               Create database
   db:migrate                         Run schema migrations (no-op if up-to-date)
   remember <content> [--uri X] [--type T]  Store a memory
-  recall <query> [--limit N]         Search memories (BM25 + priority×vitality)
+  recall <query> [--limit N]         Search memories (hybrid retrieval, auto-fallback to BM25)
   boot                               Load identity memories
   status                             Show statistics
   reflect [decay|tidy|govern|all]    Run sleep cycle
-  reindex                            Rebuild FTS index with jieba tokenizer
+  reindex [--full] [--batch-size N]  Rebuild FTS index and embeddings (if configured)
   migrate <dir>                      Import from Markdown files
   export <dir>                       Export memories to Markdown files
   help                               Show this help
@@ -54,6 +53,26 @@ function getFlag(flag: string): string | undefined {
   const idx = args.indexOf(flag);
   if (idx >= 0 && idx + 1 < args.length) return args[idx + 1];
   return undefined;
+}
+
+function hasFlag(flag: string): boolean {
+  return args.includes(flag);
+}
+
+function getPositionalArgs(startIndex = 1): string[] {
+  const values: string[] = [];
+  for (let index = startIndex; index < args.length; index++) {
+    const token = args[index];
+    if (token.startsWith("--")) {
+      const next = args[index + 1];
+      if (next !== undefined && !next.startsWith("--")) {
+        index += 1;
+      }
+      continue;
+    }
+    values.push(token);
+  }
+  return values;
 }
 
 async function main() {
@@ -76,7 +95,7 @@ async function main() {
     }
 
     case "remember": {
-      const content = args.slice(1).filter((a) => !a.startsWith("--")).join(" ");
+      const content = getPositionalArgs(1).join(" ");
       if (!content) { console.error("Usage: agent-memory remember <content>"); process.exit(1); }
       const db = openDatabase({ path: getDbPath() });
       const uri = getFlag("--uri");
@@ -89,26 +108,22 @@ async function main() {
     }
 
     case "recall": {
-      const query = args.slice(1).filter((a) => !a.startsWith("--")).join(" ");
+      const query = getPositionalArgs(1).join(" ");
       if (!query) { console.error("Usage: agent-memory recall <query>"); process.exit(1); }
       const db = openDatabase({ path: getDbPath() });
       const limit = parseInt(getFlag("--limit") ?? "10", 10);
       const agentId = getAgentId();
-      const raw = searchBM25(db, query, { agent_id: agentId, limit: Math.max(limit * 2, limit) });
-      const weighted = raw
-        .map((r) => {
-          const weight = [4.0, 3.0, 2.0, 1.0][r.memory.priority] ?? 1.0;
-          const vitality = Math.max(0.1, r.memory.vitality);
-          return { ...r, score: r.score * weight * vitality };
-        })
-        .sort((a, b) => b.score - a.score)
-        .slice(0, limit);
+      const result = await recallMemories(db, query, { agent_id: agentId, limit });
 
-      console.log(`🔍 Results: ${weighted.length}\n`);
-      for (const r of weighted) {
-        const p = ["🔴", "🟠", "🟡", "⚪"][r.memory.priority];
-        const v = (r.memory.vitality * 100).toFixed(0);
-        console.log(`${p} P${r.memory.priority} [${v}%] ${r.memory.content.slice(0, 80)}`);
+      console.log(`🔍 Results: ${result.results.length} (${result.mode})\n`);
+      for (const row of result.results) {
+        const p = ["🔴", "🟠", "🟡", "⚪"][row.memory.priority];
+        const v = (row.memory.vitality * 100).toFixed(0);
+        const branches = [
+          row.bm25_rank ? `bm25#${row.bm25_rank}` : null,
+          row.vector_rank ? `vec#${row.vector_rank}` : null,
+        ].filter(Boolean).join(" + ");
+        console.log(`${p} P${row.memory.priority} [${v}%] ${row.memory.content.slice(0, 80)}${branches ? `  (${branches})` : ""}`);
       }
       db.close();
       break;
@@ -169,22 +184,21 @@ async function main() {
 
     case "reindex": {
       const db = openDatabase({ path: getDbPath() });
-      const memories = db.prepare("SELECT id, content FROM memories").all() as Array<{ id: string; content: string }>;
-
-      // Clear and rebuild FTS index
-      db.exec("DELETE FROM memories_fts");
-      const insert = db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)");
-
-      let count = 0;
-      const txn = db.transaction(() => {
-        for (const mem of memories) {
-          insert.run(mem.id, tokenizeForIndex(mem.content));
-          count++;
-        }
+      const agentId = getAgentId();
+      const full = hasFlag("--full");
+      const batchSize = parseInt(getFlag("--batch-size") ?? "16", 10);
+      const result = await reindexMemorySearch(db, {
+        agent_id: agentId,
+        force: full,
+        batchSize,
       });
-      txn();
 
-      console.log(`🔄 Reindexed ${count} memories with jieba tokenizer`);
+      console.log(`🔄 Reindexed ${result.fts.reindexed} memories in BM25 index`);
+      if (result.embeddings.enabled) {
+        console.log(`🧬 Embeddings: provider=${result.embeddings.providerId} scanned=${result.embeddings.scanned} embedded=${result.embeddings.embedded} failed=${result.embeddings.failed}`);
+      } else {
+        console.log("🧬 Embeddings: disabled (no provider configured)");
+      }
       db.close();
       break;
     }
