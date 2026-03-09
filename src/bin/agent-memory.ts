@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 // AgentMemory v4 — CLI
-import { openDatabase } from "../core/db.js";
-import { countMemories, type MemoryType } from "../core/memory.js";
-import { exportMemories } from "../core/export.js";
-import { recallMemories, reindexMemorySearch } from "../search/hybrid.js";
-import { boot } from "../sleep/boot.js";
-import { runReflectOrchestrator } from "../sleep/orchestrator.js";
-import { syncOne } from "../sleep/sync.js";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { basename, resolve } from "path";
+import { openDatabase } from "../core/db.js";
+import { type MemoryType } from "../core/memory.js";
+import { exportMemories } from "../core/export.js";
+import { boot } from "../sleep/boot.js";
+import { startHttpServer } from "../transports/http.js";
+import { rememberMemory } from "../app/remember.js";
+import { recallMemory } from "../app/recall.js";
+import { getMemoryStatus } from "../app/status.js";
+import { reflectMemories } from "../app/reflect.js";
+import { reindexMemories } from "../app/reindex.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -36,6 +39,7 @@ Commands:
   status                             Show statistics
   reflect [decay|tidy|govern|all]    Run sleep cycle
   reindex [--full] [--batch-size N]  Rebuild FTS index and embeddings (if configured)
+  serve [--host H] [--port N]        Start the HTTP/SSE API server
   migrate <dir>                      Import from Markdown files
   export <dir>                       Export memories to Markdown files
   help                               Show this help
@@ -100,7 +104,13 @@ async function main() {
         const db = openDatabase({ path: getDbPath() });
         const uri = getFlag("--uri");
         const type = (getFlag("--type") ?? "knowledge") as MemoryType;
-        const result = await syncOne(db, { content, type, uri, source: "manual", agent_id: getAgentId() });
+        const result = await rememberMemory(db, {
+          content,
+          type,
+          uri,
+          source: "manual",
+          agent_id: getAgentId(),
+        });
         console.log(`${result.action}: ${result.reason}${result.memoryId ? ` (${result.memoryId.slice(0, 8)})` : ""}`);
         db.close();
         break;
@@ -113,7 +123,8 @@ async function main() {
           process.exit(1);
         }
         const db = openDatabase({ path: getDbPath() });
-        const result = await recallMemories(db, query, {
+        const result = await recallMemory(db, {
+          query,
           agent_id: getAgentId(),
           limit: Number.parseInt(getFlag("--limit") ?? "10", 10),
         });
@@ -148,17 +159,15 @@ async function main() {
 
       case "status": {
         const db = openDatabase({ path: getDbPath() });
-        const agentId = getAgentId();
-        const stats = countMemories(db, agentId);
-        const lowVit = (db.prepare("SELECT COUNT(*) as c FROM memories WHERE vitality < 0.1 AND agent_id = ?").get(agentId) as { c: number }).c;
-        const paths = (db.prepare("SELECT COUNT(*) as c FROM paths WHERE agent_id = ?").get(agentId) as { c: number }).c;
+        const status = getMemoryStatus(db, { agent_id: getAgentId() });
 
         console.log("🧠 AgentMemory Status\n");
-        console.log(`  Total memories: ${stats.total}`);
-        console.log(`  By type: ${Object.entries(stats.by_type).map(([key, value]) => `${key}=${value}`).join(", ")}`);
-        console.log(`  By priority: ${Object.entries(stats.by_priority).map(([key, value]) => `${key}=${value}`).join(", ")}`);
-        console.log(`  Paths: ${paths}`);
-        console.log(`  Low vitality (<10%): ${lowVit}`);
+        console.log(`  Total memories: ${status.total}`);
+        console.log(`  By type: ${Object.entries(status.by_type).map(([key, value]) => `${key}=${value}`).join(", ")}`);
+        console.log(`  By priority: ${Object.entries(status.by_priority).map(([key, value]) => `${key}=${value}`).join(", ")}`);
+        console.log(`  Paths: ${status.paths}`);
+        console.log(`  Low vitality (<10%): ${status.low_vitality}`);
+        console.log(`  Feedback events: ${status.feedback_events}`);
         db.close();
         break;
       }
@@ -166,7 +175,7 @@ async function main() {
       case "reflect": {
         const phase = (args[1] ?? "all") as "decay" | "tidy" | "govern" | "all";
         const db = openDatabase({ path: getDbPath() });
-        const result = await runReflectOrchestrator(db, { phase, agent_id: getAgentId() });
+        const result = await reflectMemories(db, { phase, agent_id: getAgentId() });
         console.log(`🌙 Reflect job ${result.jobId}${result.resumed ? " (resume)" : ""}`);
         for (const [name, summary] of Object.entries(result.results)) {
           console.log(`  ${name}: ${JSON.stringify(summary)}`);
@@ -177,7 +186,7 @@ async function main() {
 
       case "reindex": {
         const db = openDatabase({ path: getDbPath() });
-        const result = await reindexMemorySearch(db, {
+        const result = await reindexMemories(db, {
           agent_id: getAgentId(),
           force: hasFlag("--full"),
           batchSize: Number.parseInt(getFlag("--batch-size") ?? "16", 10),
@@ -189,6 +198,35 @@ async function main() {
           console.log("🧬 Embeddings: disabled (no provider configured)");
         }
         db.close();
+        break;
+      }
+
+      case "serve": {
+        const port = Number.parseInt(getFlag("--port") ?? process.env.AGENT_MEMORY_HTTP_PORT ?? "3000", 10);
+        const host = getFlag("--host") ?? process.env.AGENT_MEMORY_HTTP_HOST ?? "127.0.0.1";
+        const service = await startHttpServer({
+          dbPath: getDbPath(),
+          agentId: getAgentId(),
+          port,
+          host,
+        });
+        const address = service.server.address();
+        if (address && typeof address !== "string") {
+          console.log(`🌐 AgentMemory HTTP server listening on http://${address.address}:${address.port}`);
+        } else {
+          console.log(`🌐 AgentMemory HTTP server listening on http://${host}:${port}`);
+        }
+
+        const shutdown = async () => {
+          try {
+            await service.close();
+          } finally {
+            process.exit(0);
+          }
+        };
+
+        process.once("SIGINT", () => { void shutdown(); });
+        process.once("SIGTERM", () => { void shutdown(); });
         break;
       }
 
@@ -232,7 +270,13 @@ async function main() {
             if (!body) continue;
             const type: MemoryType = title?.toLowerCase().includes("关于") || title?.toLowerCase().includes("about") ? "identity" : "knowledge";
             const uri = `knowledge://memory-md/${title?.replace(/[^a-z0-9\u4e00-\u9fff]/gi, "-").toLowerCase()}`;
-            await syncOne(db, { content: `## ${title}\n${body}`, type, uri, source: `migrate:${basename(memoryFile)}`, agent_id: agentId });
+            await rememberMemory(db, {
+              content: `## ${title}\n${body}`,
+              type,
+              uri,
+              source: `migrate:${basename(memoryFile)}`,
+              agent_id: agentId,
+            });
             imported += 1;
           }
           console.log(`📄 ${basename(memoryFile)}: ${sections.length} sections imported`);
@@ -242,7 +286,7 @@ async function main() {
         for (const file of mdFiles) {
           const content = readFileSync(resolve(dirPath, file), "utf-8");
           const date = file.replace(/\.(md|qmd)$/i, "");
-          await syncOne(db, {
+          await rememberMemory(db, {
             content,
             type: "event",
             uri: `event://journal/${date}`,
@@ -259,7 +303,7 @@ async function main() {
           for (const file of weeklyFiles) {
             const content = readFileSync(resolve(weeklyDir, file), "utf-8");
             const week = file.replace(/\.(md|qmd)$/i, "");
-            await syncOne(db, {
+            await rememberMemory(db, {
               content,
               type: "knowledge",
               uri: `knowledge://weekly/${week}`,

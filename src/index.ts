@@ -1,5 +1,37 @@
 // AgentMemory v4 — Main library entry point
 
+// App
+export { rememberMemory, type RememberInput } from "./app/remember.js";
+export { recallMemory, type RecallInput } from "./app/recall.js";
+export {
+  surfaceMemories,
+  type SurfaceInput,
+  type SurfaceIntent,
+  type SurfaceResult,
+  type SurfaceResponse,
+} from "./app/surface.js";
+export {
+  reflectMemories,
+  type ReflectInput as AppReflectInput,
+  type ReflectProgressEvent as AppReflectProgressEvent,
+} from "./app/reflect.js";
+export { getMemoryStatus, type StatusResult } from "./app/status.js";
+export {
+  recordFeedbackEvent,
+  getFeedbackScore,
+  getFeedbackSummary,
+  type FeedbackEventInput,
+  type FeedbackEventRecord,
+  type FeedbackSummary,
+  type FeedbackSource,
+} from "./app/feedback.js";
+export {
+  reindexMemories,
+  type ReindexInput,
+  type ReindexProgressEvent,
+} from "./app/reindex.js";
+export { createHttpServer, startHttpServer, type HttpJobStatus, type HttpServerOptions, type AgentMemoryHttpServer } from "./transports/http.js";
+
 // Core
 export { openDatabase, isCountRow, type DbOptions } from "./core/db.js";
 export {
@@ -96,4 +128,11 @@ export {
   type ReflectCheckpoint,
   type ReflectStep,
 } from "./sleep/jobs.js";
-export { runReflectOrchestrator, type ReflectOptions, type ReflectRunResult, type ReflectRunners, type ReflectStats } from "./sleep/orchestrator.js";
+export {
+  runReflectOrchestrator,
+  type ReflectOptions,
+  type ReflectProgressEvent,
+  type ReflectRunResult,
+  type ReflectRunners,
+  type ReflectStats,
+} from "./sleep/orchestrator.js";

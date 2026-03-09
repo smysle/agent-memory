@@ -87,11 +87,14 @@ CREATE TABLE IF NOT EXISTS maintenance_jobs (
   finished_at  TEXT
 );
 
--- Feedback signals (reserved for future ranking / governance)
+-- Feedback signals (recall/surface usefulness + governance priors)
 CREATE TABLE IF NOT EXISTS feedback_events (
   id           TEXT PRIMARY KEY,
   memory_id    TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
-  event_type   TEXT NOT NULL,
+  source       TEXT NOT NULL DEFAULT 'surface',
+  useful       INTEGER NOT NULL DEFAULT 1,
+  agent_id     TEXT NOT NULL DEFAULT 'default',
+  event_type   TEXT NOT NULL DEFAULT 'surface:useful',
   value        REAL NOT NULL DEFAULT 1.0,
   created_at   TEXT NOT NULL
 );
@@ -153,6 +156,7 @@ export function openDatabase(opts: DbOptions): Database.Database {
   }
 
   ensureIndexes(db);
+  ensureFeedbackEventSchema(db);
 
   return db;
 }
@@ -355,7 +359,26 @@ function ensureIndexes(db: Database.Database): void {
   }
   if (tableExists(db, "feedback_events")) {
     db.exec("CREATE INDEX IF NOT EXISTS idx_feedback_events_memory ON feedback_events(memory_id, created_at DESC);");
+    if (tableHasColumn(db, "feedback_events", "agent_id") && tableHasColumn(db, "feedback_events", "source")) {
+      db.exec("CREATE INDEX IF NOT EXISTS idx_feedback_events_agent_source ON feedback_events(agent_id, source, created_at DESC);");
+    }
   }
+}
+
+function ensureFeedbackEventSchema(db: Database.Database): void {
+  if (!tableExists(db, "feedback_events")) return;
+
+  if (!tableHasColumn(db, "feedback_events", "source")) {
+    db.exec("ALTER TABLE feedback_events ADD COLUMN source TEXT NOT NULL DEFAULT 'surface';");
+  }
+  if (!tableHasColumn(db, "feedback_events", "useful")) {
+    db.exec("ALTER TABLE feedback_events ADD COLUMN useful INTEGER NOT NULL DEFAULT 1;");
+  }
+  if (!tableHasColumn(db, "feedback_events", "agent_id")) {
+    db.exec("ALTER TABLE feedback_events ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'default';");
+  }
+
+  db.exec("CREATE INDEX IF NOT EXISTS idx_feedback_events_agent_source ON feedback_events(agent_id, source, created_at DESC);");
 }
 
 function migrateV2ToV3(db: Database.Database): void {
@@ -466,7 +489,10 @@ function migrateV4ToV5(db: Database.Database): void {
       CREATE TABLE IF NOT EXISTS feedback_events (
         id           TEXT PRIMARY KEY,
         memory_id    TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
-        event_type   TEXT NOT NULL,
+        source       TEXT NOT NULL DEFAULT 'surface',
+        useful       INTEGER NOT NULL DEFAULT 1,
+        agent_id     TEXT NOT NULL DEFAULT 'default',
+        event_type   TEXT NOT NULL DEFAULT 'surface:useful',
         value        REAL NOT NULL DEFAULT 1.0,
         created_at   TEXT NOT NULL
       );

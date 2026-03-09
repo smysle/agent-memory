@@ -27,12 +27,21 @@ export interface ReflectRunners {
   govern: (db: Database.Database, opts?: { agent_id?: string }) => unknown | Promise<unknown>;
 }
 
+export interface ReflectProgressEvent {
+  status: "started" | "phase-completed" | "completed" | "failed";
+  phase: MaintenancePhase | ReflectStep;
+  progress: number;
+  jobId?: string;
+  detail?: unknown;
+}
+
 export interface ReflectOptions {
   phase: MaintenancePhase;
   agent_id?: string;
   jobId?: string;
   resume?: boolean;
   runners?: Partial<ReflectRunners>;
+  onProgress?: (event: ReflectProgressEvent) => void;
 }
 
 export interface ReflectRunResult {
@@ -118,6 +127,18 @@ export async function runReflectOrchestrator(
   const startPhase = checkpoint.nextPhase ?? orderedPhases[orderedPhases.length - 1] ?? "decay";
   const startIndex = Math.max(0, orderedPhases.indexOf(startPhase));
   const phasesToRun = checkpoint.nextPhase === null ? [] : orderedPhases.slice(startIndex);
+  const totalPhases = Math.max(orderedPhases.length, 1);
+
+  opts.onProgress?.({
+    status: "started",
+    phase: opts.phase,
+    progress: checkpoint.completedPhases.length / totalPhases,
+    jobId,
+    detail: {
+      resumed,
+      nextPhase: checkpoint.nextPhase,
+    },
+  });
 
   try {
     for (const phase of phasesToRun) {
@@ -132,10 +153,24 @@ export async function runReflectOrchestrator(
         nextPhase: nextPhase(phase, opts.phase),
       };
       updateMaintenanceCheckpoint(db, jobId, checkpoint);
+      opts.onProgress?.({
+        status: "phase-completed",
+        phase,
+        progress: checkpoint.completedPhases.length / totalPhases,
+        jobId,
+        detail: result,
+      });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const failed = failMaintenanceJob(db, jobId, message, checkpoint) ?? baseJob;
+    opts.onProgress?.({
+      status: "failed",
+      phase: checkpoint.nextPhase ?? opts.phase,
+      progress: checkpoint.completedPhases.length / totalPhases,
+      jobId,
+      detail: { error: message },
+    });
     throw Object.assign(new Error(message), { job: failed, checkpoint });
   }
 
@@ -145,6 +180,14 @@ export async function runReflectOrchestrator(
   };
   const job = completeMaintenanceJob(db, jobId, completedCheckpoint) ?? baseJob;
   const after = getSummaryStats(db, opts.agent_id);
+
+  opts.onProgress?.({
+    status: "completed",
+    phase: opts.phase,
+    progress: 1,
+    jobId,
+    detail: completedCheckpoint.phaseResults,
+  });
 
   return {
     job,

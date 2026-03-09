@@ -12,23 +12,18 @@ import {
   type Memory,
 } from "../core/memory.js";
 import { getPathByUri, getPathsByPrefix } from "../core/path.js";
-import { searchBM25 } from "../search/bm25.js";
-import { recallMemories, reindexMemorySearch } from "../search/hybrid.js";
-import { syncOne } from "../sleep/sync.js";
-import { runReflectOrchestrator } from "../sleep/orchestrator.js";
 import { boot } from "../sleep/boot.js";
 import { ingestText } from "../ingest/ingest.js";
 import { runAutoIngestWatcher } from "../ingest/watcher.js";
+import { rememberMemory } from "../app/remember.js";
+import { recallMemory } from "../app/recall.js";
+import { surfaceMemories, type SurfaceIntent } from "../app/surface.js";
+import { reflectMemories } from "../app/reflect.js";
+import { getMemoryStatus } from "../app/status.js";
+import { reindexMemories } from "../app/reindex.js";
 
 const DB_PATH = process.env.AGENT_MEMORY_DB ?? "./agent-memory.db";
 const AGENT_ID = process.env.AGENT_MEMORY_AGENT_ID ?? "default";
-
-const PRIORITY_WEIGHT: Record<number, number> = {
-  0: 4.0,
-  1: 3.0,
-  2: 2.0,
-  3: 1.0,
-};
 
 function formatMemory(memory: Memory, score?: number) {
   return {
@@ -50,9 +45,9 @@ function formatWarmBootNarrative(
   events: Memory[],
   totalStats: ReturnType<typeof countMemories>,
 ): string {
-  const now = Date.now();
-  const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
-  const recentEvents = events.filter((e) => new Date(e.updated_at).getTime() >= sevenDaysAgo);
+  const currentTime = Date.now();
+  const sevenDaysAgo = currentTime - 7 * 24 * 60 * 60 * 1000;
+  const recentEvents = events.filter((event) => new Date(event.updated_at).getTime() >= sevenDaysAgo);
   const olderEventCount = Math.max(0, events.length - recentEvents.length);
 
   const avgVitalitySource = [...identities, ...emotions, ...knowledges, ...events];
@@ -146,6 +141,45 @@ function formatReflectReport(input: {
   return lines.join("\n");
 }
 
+function formatRecallPayload(result: Awaited<ReturnType<typeof recallMemory>>) {
+  return {
+    mode: result.mode,
+    provider_id: result.providerId,
+    count: result.results.length,
+    memories: result.results.map((row) => ({
+      ...formatMemory(row.memory, row.score),
+      bm25_rank: row.bm25_rank,
+      vector_rank: row.vector_rank,
+      bm25_score: row.bm25_score,
+      vector_score: row.vector_score,
+    })),
+  };
+}
+
+function formatSurfacePayload(result: Awaited<ReturnType<typeof surfaceMemories>>) {
+  return {
+    count: result.count,
+    query: result.query,
+    task: result.task,
+    intent: result.intent,
+    results: result.results.map((row) => ({
+      id: row.memory.id,
+      content: row.memory.content,
+      type: row.memory.type,
+      priority: row.memory.priority,
+      vitality: row.memory.vitality,
+      score: row.score,
+      semantic_score: row.semantic_score,
+      lexical_score: row.lexical_score,
+      task_match: row.task_match,
+      priority_prior: row.priority_prior,
+      feedback_score: row.feedback_score,
+      reason_codes: row.reason_codes,
+      updated_at: row.memory.updated_at,
+    })),
+  };
+}
+
 export function createMcpServer(dbPath?: string, agentId?: string): { server: McpServer; db: ReturnType<typeof openDatabase> } {
   const db = openDatabase({ path: dbPath ?? DB_PATH });
   const aid = agentId ?? AGENT_ID;
@@ -164,9 +198,10 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
       uri: z.string().optional().describe("URI path (e.g. core://user/name, emotion://2026-02-20/love)"),
       emotion_val: z.number().min(-1).max(1).default(0).describe("Emotional valence (-1 negative to +1 positive)"),
       source: z.string().optional().describe("Source annotation (e.g. session ID, date)"),
+      agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
     },
-    async ({ content, type, uri, emotion_val, source }) => {
-      const result = await syncOne(db, { content, type, uri, emotion_val, source, agent_id: aid });
+    async ({ content, type, uri, emotion_val, source, agent_id }) => {
+      const result = await rememberMemory(db, { content, type, uri, emotion_val, source, agent_id: agent_id ?? aid });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
   );
@@ -177,22 +212,11 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
     {
       query: z.string().describe("Search query (natural language)"),
       limit: z.number().default(10).describe("Max results to return"),
+      agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
     },
-    async ({ query, limit }) => {
-      const recall = await recallMemories(db, query, { agent_id: aid, limit });
-      const output = {
-        mode: recall.mode,
-        provider_id: recall.providerId,
-        count: recall.results.length,
-        memories: recall.results.map((result) => ({
-          ...formatMemory(result.memory, result.score),
-          bm25_rank: result.bm25_rank,
-          vector_rank: result.vector_rank,
-          bm25_score: result.bm25_score,
-          vector_score: result.vector_score,
-        })),
-      };
-      return { content: [{ type: "text" as const, text: JSON.stringify(output, null, 2) }] };
+    async ({ query, limit, agent_id }) => {
+      const result = await recallMemory(db, { query, limit, agent_id: agent_id ?? aid });
+      return { content: [{ type: "text" as const, text: JSON.stringify(formatRecallPayload(result), null, 2) }] };
     },
   );
 
@@ -309,11 +333,13 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
     "Trigger sleep cycle phases via the maintenance orchestrator and return a human-readable markdown report.",
     {
       phase: z.enum(["decay", "tidy", "govern", "all"]).describe("Which sleep phase to run"),
+      agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
     },
-    async ({ phase }) => {
-      const before = getSummaryStats(db, aid);
-      const result = await runReflectOrchestrator(db, { phase, agent_id: aid });
-      const after = getSummaryStats(db, aid);
+    async ({ phase, agent_id }) => {
+      const effectiveAgentId = agent_id ?? aid;
+      const before = getSummaryStats(db, effectiveAgentId);
+      const result = await reflectMemories(db, { phase, agent_id: effectiveAgentId });
+      const after = getSummaryStats(db, effectiveAgentId);
       const report = formatReflectReport({
         phase,
         jobId: result.jobId,
@@ -329,20 +355,15 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
   server.tool(
     "status",
     "Get memory system statistics: counts by type/priority and health metrics.",
-    {},
-    async () => {
-      const stats = countMemories(db, aid);
-      const lowVitality = db.prepare("SELECT COUNT(*) as c FROM memories WHERE vitality < 0.1 AND agent_id = ?").get(aid) as { c: number };
-      const totalPaths = db.prepare("SELECT COUNT(*) as c FROM paths WHERE agent_id = ?").get(aid) as { c: number };
+    {
+      agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
+    },
+    async ({ agent_id }) => {
+      const stats = getMemoryStatus(db, { agent_id: agent_id ?? aid });
       return {
         content: [{
           type: "text" as const,
-          text: JSON.stringify({
-            ...stats,
-            paths: totalPaths.c,
-            low_vitality: lowVitality.c,
-            agent_id: aid,
-          }, null, 2),
+          text: JSON.stringify(stats, null, 2),
         }],
       };
     },
@@ -373,10 +394,11 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
     {
       full: z.boolean().default(false).optional().describe("Force full embedding rebuild instead of incremental backfill"),
       batch_size: z.number().min(1).max(128).default(16).optional().describe("Embedding batch size for reindex"),
+      agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
     },
-    async ({ full, batch_size }) => {
-      const result = await reindexMemorySearch(db, {
-        agent_id: aid,
+    async ({ full, batch_size, agent_id }) => {
+      const result = await reindexMemories(db, {
+        agent_id: agent_id ?? aid,
         force: full ?? false,
         batchSize: batch_size ?? 16,
       });
@@ -386,62 +408,33 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
 
   server.tool(
     "surface",
-    "Lightweight readonly memory surfacing: keyword OR search + priority×vitality×hitRatio ranking (no access recording).",
+    "Context-aware readonly memory surfacing with query/task/recent_turns/intent scoring (no access recording).",
     {
-      keywords: z.array(z.string()).min(1).describe("Keywords to surface related memories"),
+      query: z.string().optional().describe("Optional semantic query for surfacing"),
+      task: z.string().optional().describe("Current task description"),
+      recent_turns: z.array(z.string()).optional().describe("Recent conversation turns for context"),
+      intent: z.enum(["factual", "preference", "temporal", "planning", "design"]).optional().describe("Surface intent bias"),
+      types: z.array(z.enum(["identity", "emotion", "knowledge", "event"]).describe("Optional type filter")).optional(),
       limit: z.number().min(1).max(20).default(5).optional().describe("Max results (default 5, max 20)"),
-      types: z.array(z.enum(["identity", "emotion", "knowledge", "event"])).optional().describe("Optional type filter"),
-      min_vitality: z.number().min(0).max(1).default(0.1).optional().describe("Minimum vitality filter"),
+      agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
+      keywords: z.array(z.string()).optional().describe("Deprecated alias: joined into query when query is omitted"),
     },
-    async ({ keywords, limit, types, min_vitality }) => {
-      const maxResults = limit ?? 5;
-      const minVitality = min_vitality ?? 0.1;
-      const normalizedKeywords = keywords.map((keyword) => keyword.trim()).filter(Boolean);
-      const candidates = new Map<string, { memory: Memory; hits: number }>();
-
-      for (const keyword of normalizedKeywords) {
-        const results = searchBM25(db, keyword, { agent_id: aid, limit: 50, min_vitality: minVitality });
-        for (const result of results) {
-          const existing = candidates.get(result.memory.id);
-          if (existing) {
-            existing.hits += 1;
-          } else {
-            candidates.set(result.memory.id, { memory: result.memory, hits: 1 });
-          }
-        }
-      }
-
-      const scored = [...candidates.values()]
-        .filter((candidate) => candidate.memory.vitality >= minVitality)
-        .filter((candidate) => (types?.length ? types.includes(candidate.memory.type) : true))
-        .map((candidate) => {
-          const weight = PRIORITY_WEIGHT[candidate.memory.priority] ?? 1.0;
-          const hitRatio = normalizedKeywords.length > 0 ? candidate.hits / normalizedKeywords.length : 0;
-          return {
-            memory: candidate.memory,
-            hits: candidate.hits,
-            score: weight * candidate.memory.vitality * hitRatio,
-          };
-        })
-        .sort((left, right) => right.score - left.score)
-        .slice(0, maxResults);
+    async ({ query, task, recent_turns, intent, types, limit, agent_id, keywords }) => {
+      const resolvedQuery = query ?? keywords?.join(" ");
+      const result = await surfaceMemories(db, {
+        query: resolvedQuery,
+        task,
+        recent_turns,
+        intent: intent as SurfaceIntent | undefined,
+        types,
+        limit: limit ?? 5,
+        agent_id: agent_id ?? aid,
+      });
 
       return {
         content: [{
           type: "text" as const,
-          text: JSON.stringify({
-            count: scored.length,
-            results: scored.map((row) => ({
-              id: row.memory.id,
-              type: row.memory.type,
-              priority: row.memory.priority,
-              vitality: row.memory.vitality,
-              content: row.memory.content,
-              score: row.score,
-              keyword_hits: row.hits,
-              updated_at: row.memory.updated_at,
-            })),
-          }, null, 2),
+          text: JSON.stringify(formatSurfacePayload(result), null, 2),
         }],
       };
     },
