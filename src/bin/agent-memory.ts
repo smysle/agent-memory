@@ -1,17 +1,14 @@
 #!/usr/bin/env node
 // AgentMemory v4 — CLI
 import { openDatabase } from "../core/db.js";
-import { countMemories } from "../core/memory.js";
+import { countMemories, type MemoryType } from "../core/memory.js";
 import { exportMemories } from "../core/export.js";
 import { recallMemories, reindexMemorySearch } from "../search/hybrid.js";
 import { boot } from "../sleep/boot.js";
-import { runDecay } from "../sleep/decay.js";
-import { runTidy } from "../sleep/tidy.js";
-import { runGovern } from "../sleep/govern.js";
+import { runReflectOrchestrator } from "../sleep/orchestrator.js";
 import { syncOne } from "../sleep/sync.js";
 import { existsSync, readFileSync, readdirSync } from "fs";
-import { resolve, basename } from "path";
-import type { MemoryType } from "../core/memory.js";
+import { basename, resolve } from "path";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -50,8 +47,8 @@ Environment:
 }
 
 function getFlag(flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx >= 0 && idx + 1 < args.length) return args[idx + 1];
+  const index = args.indexOf(flag);
+  if (index >= 0 && index + 1 < args.length) return args[index + 1];
   return undefined;
 }
 
@@ -78,230 +75,221 @@ function getPositionalArgs(startIndex = 1): string[] {
 async function main() {
   try {
     switch (command) {
-    case "init": {
-      const dbPath = getDbPath();
-      openDatabase({ path: dbPath });
-      console.log(`✅ Database created at ${dbPath}`);
-      break;
-    }
-
-    case "db:migrate": {
-      const dbPath = getDbPath();
-      const db = openDatabase({ path: dbPath });
-      const version = (db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined)?.value;
-      console.log(`✅ Schema version: ${version ?? "unknown"} (${dbPath})`);
-      db.close();
-      break;
-    }
-
-    case "remember": {
-      const content = getPositionalArgs(1).join(" ");
-      if (!content) { console.error("Usage: agent-memory remember <content>"); process.exit(1); }
-      const db = openDatabase({ path: getDbPath() });
-      const uri = getFlag("--uri");
-      const type = (getFlag("--type") ?? "knowledge") as MemoryType;
-      const agentId = getAgentId();
-      const result = syncOne(db, { content, type, uri, source: "manual", agent_id: agentId });
-      console.log(`${result.action}: ${result.reason}${result.memoryId ? ` (${result.memoryId.slice(0, 8)})` : ""}`);
-      db.close();
-      break;
-    }
-
-    case "recall": {
-      const query = getPositionalArgs(1).join(" ");
-      if (!query) { console.error("Usage: agent-memory recall <query>"); process.exit(1); }
-      const db = openDatabase({ path: getDbPath() });
-      const limit = parseInt(getFlag("--limit") ?? "10", 10);
-      const agentId = getAgentId();
-      const result = await recallMemories(db, query, { agent_id: agentId, limit });
-
-      console.log(`🔍 Results: ${result.results.length} (${result.mode})\n`);
-      for (const row of result.results) {
-        const p = ["🔴", "🟠", "🟡", "⚪"][row.memory.priority];
-        const v = (row.memory.vitality * 100).toFixed(0);
-        const branches = [
-          row.bm25_rank ? `bm25#${row.bm25_rank}` : null,
-          row.vector_rank ? `vec#${row.vector_rank}` : null,
-        ].filter(Boolean).join(" + ");
-        console.log(`${p} P${row.memory.priority} [${v}%] ${row.memory.content.slice(0, 80)}${branches ? `  (${branches})` : ""}`);
+      case "init": {
+        const dbPath = getDbPath();
+        openDatabase({ path: dbPath });
+        console.log(`✅ Database created at ${dbPath}`);
+        break;
       }
-      db.close();
-      break;
-    }
 
-    case "boot": {
-      const db = openDatabase({ path: getDbPath() });
-      const result = boot(db, { agent_id: getAgentId() });
-      console.log(`🧠 Boot: ${result.identityMemories.length} identity memories loaded\n`);
-      for (const m of result.identityMemories) {
-        console.log(`  🔴 ${m.content.slice(0, 100)}`);
+      case "db:migrate": {
+        const dbPath = getDbPath();
+        const db = openDatabase({ path: dbPath });
+        const version = (db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined)?.value;
+        console.log(`✅ Schema version: ${version ?? "unknown"} (${dbPath})`);
+        db.close();
+        break;
       }
-      if (result.bootPaths.length) {
-        console.log(`\n📍 Boot paths: ${result.bootPaths.join(", ")}`);
-      }
-      db.close();
-      break;
-    }
 
-    case "status": {
-      const db = openDatabase({ path: getDbPath() });
-      const agentId = getAgentId();
-      const stats = countMemories(db, agentId);
-      const lowVit = (db.prepare("SELECT COUNT(*) as c FROM memories WHERE vitality < 0.1 AND agent_id = ?").get(agentId) as { c: number }).c;
-      const paths = (db.prepare("SELECT COUNT(*) as c FROM paths WHERE agent_id = ?").get(agentId) as { c: number }).c;
-
-      console.log("🧠 AgentMemory Status\n");
-      console.log(`  Total memories: ${stats.total}`);
-      console.log(`  By type: ${Object.entries(stats.by_type).map(([k, v]) => `${k}=${v}`).join(", ")}`);
-      console.log(`  By priority: ${Object.entries(stats.by_priority).map(([k, v]) => `${k}=${v}`).join(", ")}`);
-      console.log(`  Paths: ${paths}`);
-      console.log(`  Low vitality (<10%): ${lowVit}`);
-      db.close();
-      break;
-    }
-
-    case "reflect": {
-      const phase = (args[1] ?? "all") as "decay" | "tidy" | "govern" | "all";
-      const db = openDatabase({ path: getDbPath() });
-      const agentId = getAgentId();
-      console.log(`🌙 Running ${phase} phase...\n`);
-
-      if (phase === "decay" || phase === "all") {
-        const r = runDecay(db, { agent_id: agentId });
-        console.log(`  Decay: ${r.updated} updated, ${r.decayed} decayed, ${r.belowThreshold} below threshold`);
-      }
-      if (phase === "tidy" || phase === "all") {
-        const r = runTidy(db, { agent_id: agentId });
-        console.log(`  Tidy: ${r.archived} archived, ${r.orphansCleaned} orphans`);
-      }
-      if (phase === "govern" || phase === "all") {
-        const r = runGovern(db, { agent_id: agentId });
-        console.log(`  Govern: ${r.orphanPaths} paths, ${r.emptyMemories} empty cleaned`);
-      }
-      db.close();
-      break;
-    }
-
-    case "reindex": {
-      const db = openDatabase({ path: getDbPath() });
-      const agentId = getAgentId();
-      const full = hasFlag("--full");
-      const batchSize = parseInt(getFlag("--batch-size") ?? "16", 10);
-      const result = await reindexMemorySearch(db, {
-        agent_id: agentId,
-        force: full,
-        batchSize,
-      });
-
-      console.log(`🔄 Reindexed ${result.fts.reindexed} memories in BM25 index`);
-      if (result.embeddings.enabled) {
-        console.log(`🧬 Embeddings: provider=${result.embeddings.providerId} scanned=${result.embeddings.scanned} embedded=${result.embeddings.embedded} failed=${result.embeddings.failed}`);
-      } else {
-        console.log("🧬 Embeddings: disabled (no provider configured)");
-      }
-      db.close();
-      break;
-    }
-
-    case "export": {
-      const dir = args[1];
-      if (!dir) { console.error("Usage: agent-memory export <directory>"); process.exit(1); }
-      const dirPath = resolve(dir);
-
-      const db = openDatabase({ path: getDbPath() });
-      const agentId = getAgentId();
-      const result = exportMemories(db, dirPath, { agent_id: agentId });
-      console.log(`✅ Export complete: ${result.exported} items to ${dirPath} (${result.files.length} files)`);
-      db.close();
-      break;
-    }
-
-    case "migrate": {
-      const dir = args[1];
-      if (!dir) { console.error("Usage: agent-memory migrate <directory>"); process.exit(1); }
-      const dirPath = resolve(dir);
-      if (!existsSync(dirPath)) { console.error(`Directory not found: ${dirPath}`); process.exit(1); }
-
-      const db = openDatabase({ path: getDbPath() });
-      const agentId = getAgentId();
-      let imported = 0;
-
-      // Check for MEMORY.md / MEMORY.qmd
-      const memoryFile = (["MEMORY.md", "MEMORY.qmd"].map((f) => resolve(dirPath, f))).find((p) => existsSync(p));
-      if (memoryFile) {
-        const content = readFileSync(memoryFile, "utf-8");
-        const sections = content.split(/^## /m).filter((s) => s.trim());
-
-        for (const section of sections) {
-          const lines = section.split("\n");
-          const title = lines[0]?.trim();
-          const body = lines.slice(1).join("\n").trim();
-          if (!body) continue;
-
-          const type: MemoryType = title?.toLowerCase().includes("关于") || title?.toLowerCase().includes("about")
-            ? "identity" : "knowledge";
-          const uri = `knowledge://memory-md/${title?.replace(/[^a-z0-9\u4e00-\u9fff]/gi, "-").toLowerCase()}`;
-
-          syncOne(db, { content: `## ${title}\n${body}`, type, uri, source: `migrate:${basename(memoryFile)}`, agent_id: agentId });
-          imported++;
+      case "remember": {
+        const content = getPositionalArgs(1).join(" ");
+        if (!content) {
+          console.error("Usage: agent-memory remember <content>");
+          process.exit(1);
         }
-        console.log(`📄 ${basename(memoryFile)}: ${sections.length} sections imported`);
+        const db = openDatabase({ path: getDbPath() });
+        const uri = getFlag("--uri");
+        const type = (getFlag("--type") ?? "knowledge") as MemoryType;
+        const result = await syncOne(db, { content, type, uri, source: "manual", agent_id: getAgentId() });
+        console.log(`${result.action}: ${result.reason}${result.memoryId ? ` (${result.memoryId.slice(0, 8)})` : ""}`);
+        db.close();
+        break;
       }
 
-      // Check for daily journals
-      const mdFiles = readdirSync(dirPath).filter((f) => /^\d{4}-\d{2}-\d{2}\.(md|qmd)$/.test(f)).sort();
-      for (const file of mdFiles) {
-        const content = readFileSync(resolve(dirPath, file), "utf-8");
-        const date = file.replace(/\.(md|qmd)$/i, "");
-        syncOne(db, {
-          content,
-          type: "event",
-          uri: `event://journal/${date}`,
-          source: `migrate:${file}`,
-          agent_id: agentId,
+      case "recall": {
+        const query = getPositionalArgs(1).join(" ");
+        if (!query) {
+          console.error("Usage: agent-memory recall <query>");
+          process.exit(1);
+        }
+        const db = openDatabase({ path: getDbPath() });
+        const result = await recallMemories(db, query, {
+          agent_id: getAgentId(),
+          limit: Number.parseInt(getFlag("--limit") ?? "10", 10),
         });
-        imported++;
-      }
-      if (mdFiles.length) console.log(`📝 Journals: ${mdFiles.length} files imported`);
 
-      // Check for weekly summaries
-      const weeklyDir = resolve(dirPath, "weekly");
-      if (existsSync(weeklyDir)) {
-        const weeklyFiles = readdirSync(weeklyDir).filter((f) => f.endsWith(".md") || f.endsWith(".qmd"));
-        for (const file of weeklyFiles) {
-          const content = readFileSync(resolve(weeklyDir, file), "utf-8");
-          const week = file.replace(/\.(md|qmd)$/i, "");
-          syncOne(db, {
+        console.log(`🔍 Results: ${result.results.length} (${result.mode})\n`);
+        for (const row of result.results) {
+          const priorityLabel = ["🔴", "🟠", "🟡", "⚪"][row.memory.priority];
+          const vitality = (row.memory.vitality * 100).toFixed(0);
+          const branches = [
+            row.bm25_rank ? `bm25#${row.bm25_rank}` : null,
+            row.vector_rank ? `vec#${row.vector_rank}` : null,
+          ].filter(Boolean).join(" + ");
+          console.log(`${priorityLabel} P${row.memory.priority} [${vitality}%] ${row.memory.content.slice(0, 80)}${branches ? `  (${branches})` : ""}`);
+        }
+        db.close();
+        break;
+      }
+
+      case "boot": {
+        const db = openDatabase({ path: getDbPath() });
+        const result = boot(db, { agent_id: getAgentId() });
+        console.log(`🧠 Boot: ${result.identityMemories.length} identity memories loaded\n`);
+        for (const memory of result.identityMemories) {
+          console.log(`  🔴 ${memory.content.slice(0, 100)}`);
+        }
+        if (result.bootPaths.length) {
+          console.log(`\n📍 Boot paths: ${result.bootPaths.join(", ")}`);
+        }
+        db.close();
+        break;
+      }
+
+      case "status": {
+        const db = openDatabase({ path: getDbPath() });
+        const agentId = getAgentId();
+        const stats = countMemories(db, agentId);
+        const lowVit = (db.prepare("SELECT COUNT(*) as c FROM memories WHERE vitality < 0.1 AND agent_id = ?").get(agentId) as { c: number }).c;
+        const paths = (db.prepare("SELECT COUNT(*) as c FROM paths WHERE agent_id = ?").get(agentId) as { c: number }).c;
+
+        console.log("🧠 AgentMemory Status\n");
+        console.log(`  Total memories: ${stats.total}`);
+        console.log(`  By type: ${Object.entries(stats.by_type).map(([key, value]) => `${key}=${value}`).join(", ")}`);
+        console.log(`  By priority: ${Object.entries(stats.by_priority).map(([key, value]) => `${key}=${value}`).join(", ")}`);
+        console.log(`  Paths: ${paths}`);
+        console.log(`  Low vitality (<10%): ${lowVit}`);
+        db.close();
+        break;
+      }
+
+      case "reflect": {
+        const phase = (args[1] ?? "all") as "decay" | "tidy" | "govern" | "all";
+        const db = openDatabase({ path: getDbPath() });
+        const result = await runReflectOrchestrator(db, { phase, agent_id: getAgentId() });
+        console.log(`🌙 Reflect job ${result.jobId}${result.resumed ? " (resume)" : ""}`);
+        for (const [name, summary] of Object.entries(result.results)) {
+          console.log(`  ${name}: ${JSON.stringify(summary)}`);
+        }
+        db.close();
+        break;
+      }
+
+      case "reindex": {
+        const db = openDatabase({ path: getDbPath() });
+        const result = await reindexMemorySearch(db, {
+          agent_id: getAgentId(),
+          force: hasFlag("--full"),
+          batchSize: Number.parseInt(getFlag("--batch-size") ?? "16", 10),
+        });
+        console.log(`🔄 Reindexed ${result.fts.reindexed} memories in BM25 index`);
+        if (result.embeddings.enabled) {
+          console.log(`🧬 Embeddings: provider=${result.embeddings.providerId} scanned=${result.embeddings.scanned} embedded=${result.embeddings.embedded} failed=${result.embeddings.failed}`);
+        } else {
+          console.log("🧬 Embeddings: disabled (no provider configured)");
+        }
+        db.close();
+        break;
+      }
+
+      case "export": {
+        const dir = args[1];
+        if (!dir) {
+          console.error("Usage: agent-memory export <directory>");
+          process.exit(1);
+        }
+        const db = openDatabase({ path: getDbPath() });
+        const result = exportMemories(db, resolve(dir), { agent_id: getAgentId() });
+        console.log(`✅ Export complete: ${result.exported} items to ${resolve(dir)} (${result.files.length} files)`);
+        db.close();
+        break;
+      }
+
+      case "migrate": {
+        const dir = args[1];
+        if (!dir) {
+          console.error("Usage: agent-memory migrate <directory>");
+          process.exit(1);
+        }
+        const dirPath = resolve(dir);
+        if (!existsSync(dirPath)) {
+          console.error(`Directory not found: ${dirPath}`);
+          process.exit(1);
+        }
+
+        const db = openDatabase({ path: getDbPath() });
+        const agentId = getAgentId();
+        let imported = 0;
+
+        const memoryFile = ["MEMORY.md", "MEMORY.qmd"].map((file) => resolve(dirPath, file)).find((file) => existsSync(file));
+        if (memoryFile) {
+          const content = readFileSync(memoryFile, "utf-8");
+          const sections = content.split(/^## /m).filter((section) => section.trim());
+          for (const section of sections) {
+            const lines = section.split("\n");
+            const title = lines[0]?.trim();
+            const body = lines.slice(1).join("\n").trim();
+            if (!body) continue;
+            const type: MemoryType = title?.toLowerCase().includes("关于") || title?.toLowerCase().includes("about") ? "identity" : "knowledge";
+            const uri = `knowledge://memory-md/${title?.replace(/[^a-z0-9\u4e00-\u9fff]/gi, "-").toLowerCase()}`;
+            await syncOne(db, { content: `## ${title}\n${body}`, type, uri, source: `migrate:${basename(memoryFile)}`, agent_id: agentId });
+            imported += 1;
+          }
+          console.log(`📄 ${basename(memoryFile)}: ${sections.length} sections imported`);
+        }
+
+        const mdFiles = readdirSync(dirPath).filter((file) => /^\d{4}-\d{2}-\d{2}\.(md|qmd)$/.test(file)).sort();
+        for (const file of mdFiles) {
+          const content = readFileSync(resolve(dirPath, file), "utf-8");
+          const date = file.replace(/\.(md|qmd)$/i, "");
+          await syncOne(db, {
             content,
-            type: "knowledge",
-            uri: `knowledge://weekly/${week}`,
-            source: `migrate:weekly/${file}`,
+            type: "event",
+            uri: `event://journal/${date}`,
+            source: `migrate:${file}`,
             agent_id: agentId,
           });
-          imported++;
+          imported += 1;
         }
-        if (weeklyFiles.length) console.log(`📦 Weekly: ${weeklyFiles.length} files imported`);
+        if (mdFiles.length) console.log(`📝 Journals: ${mdFiles.length} files imported`);
+
+        const weeklyDir = resolve(dirPath, "weekly");
+        if (existsSync(weeklyDir)) {
+          const weeklyFiles = readdirSync(weeklyDir).filter((file) => file.endsWith(".md") || file.endsWith(".qmd"));
+          for (const file of weeklyFiles) {
+            const content = readFileSync(resolve(weeklyDir, file), "utf-8");
+            const week = file.replace(/\.(md|qmd)$/i, "");
+            await syncOne(db, {
+              content,
+              type: "knowledge",
+              uri: `knowledge://weekly/${week}`,
+              source: `migrate:weekly/${file}`,
+              agent_id: agentId,
+            });
+            imported += 1;
+          }
+          if (weeklyFiles.length) console.log(`📦 Weekly: ${weeklyFiles.length} files imported`);
+        }
+
+        console.log(`\n✅ Migration complete: ${imported} items imported`);
+        db.close();
+        break;
       }
 
-      console.log(`\n✅ Migration complete: ${imported} items imported`);
-      db.close();
-      break;
-    }
+      case "help":
+      case "--help":
+      case "-h":
+      case undefined:
+        printHelp();
+        break;
 
-    case "help":
-    case "--help":
-    case "-h":
-    case undefined:
-      printHelp();
-      break;
-
-    default:
-      console.error(`Unknown command: ${command}`);
-      printHelp();
-      process.exit(1);
+      default:
+        console.error(`Unknown command: ${command}`);
+        printHelp();
+        process.exit(1);
     }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     console.error("Error:", message);
     process.exit(1);
   }

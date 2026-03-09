@@ -20,10 +20,10 @@ afterAll(() => {
 });
 
 describe("Integration", () => {
-  it("stores Chinese memories", () => {
-    expect(syncOne(db, { content: "我是小金管家，主人叫Jay King", type: "identity", uri: "core://agent/identity" }).action).toBe("added");
-    expect(syncOne(db, { content: "BTC日线VolumeBreakout实盘400U", type: "knowledge", uri: "knowledge://strategy/vb" }).action).toBe("added");
-    expect(syncOne(db, { content: "可转债双低轮动采集系统已上线382只", type: "event", uri: "event://2026-02-20/cb" }).action).toBe("added");
+  it("stores Chinese memories", async () => {
+    expect((await syncOne(db, { content: "我是小金管家，主人叫Jay King", type: "identity", uri: "core://agent/identity" })).action).toBe("added");
+    expect((await syncOne(db, { content: "BTC日线VolumeBreakout实盘400U", type: "knowledge", uri: "knowledge://strategy/vb" })).action).toBe("added");
+    expect((await syncOne(db, { content: "可转债双低轮动采集系统已上线382只", type: "event", uri: "event://2026-02-20/cb" })).action).toBe("added");
   });
 
   it("searches Chinese content", () => {
@@ -56,8 +56,8 @@ describe("Integration", () => {
     expect(b.identityMemories[0].content).toContain("小金管家");
   });
 
-  it("deduplicates via Write Guard", () => {
-    const r = guard(db, { content: "我是小金管家，主人叫Jay King", type: "identity", uri: "core://agent/identity" });
+  it("deduplicates via Write Guard", async () => {
+    const r = await guard(db, { content: "我是小金管家，主人叫Jay King", type: "identity", uri: "core://agent/identity" });
     expect(["skip", "update"]).toContain(r.action);
   });
 

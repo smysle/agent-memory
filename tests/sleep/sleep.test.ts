@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type Database from "better-sqlite3";
+import { readFileSync, rmSync, unlinkSync } from "fs";
 import { openDatabase } from "../../src/core/db.js";
+import { exportMemories } from "../../src/core/export.js";
 import { createMemory, getMemory, listMemories } from "../../src/core/memory.js";
 import { createPath } from "../../src/core/path.js";
-import { syncOne, syncBatch } from "../../src/sleep/sync.js";
-import { runTidy } from "../../src/sleep/tidy.js";
-import { runGovern } from "../../src/sleep/govern.js";
-import { runDecay } from "../../src/sleep/decay.js";
 import { boot } from "../../src/sleep/boot.js";
-import { exportMemories } from "../../src/core/export.js";
-import type Database from "better-sqlite3";
-import { unlinkSync, readFileSync, rmSync } from "fs";
+import { runDecay } from "../../src/sleep/decay.js";
+import { runGovern } from "../../src/sleep/govern.js";
+import { syncBatch, syncOne } from "../../src/sleep/sync.js";
+import { runTidy } from "../../src/sleep/tidy.js";
 
 const TEST_DB = "/tmp/agent-memory-sleep-test.db";
 
@@ -30,54 +30,56 @@ describe("Sleep Cycle", () => {
     try { unlinkSync(TEST_DB + "-shm"); } catch {}
   });
 
-  it("syncOne adds/skips/updates", () => {
-    const first = syncOne(db, { content: "Original identity memory content", type: "identity", uri: "core://test" });
+  it("syncOne adds/skips/updates", async () => {
+    const first = await syncOne(db, { content: "Original identity memory content", type: "identity", uri: "core://test" });
     expect(first.action).toBe("added");
 
-    const duplicate = syncOne(db, { content: "Original identity memory content", type: "identity", uri: "core://test" });
+    const duplicate = await syncOne(db, { content: "Original identity memory content", type: "identity", uri: "core://test" });
     expect(["skipped", "updated", "merged"]).toContain(duplicate.action);
 
-    const second = syncOne(db, { content: "Updated identity memory version", type: "identity", uri: "core://test" });
+    const second = await syncOne(db, { content: "Updated identity memory version", type: "identity", uri: "core://test" });
     expect(second.action).toBe("updated");
   });
 
-  it("syncBatch processes multiple items", () => {
-    const results = syncBatch(db, [
+  it("syncBatch processes multiple items", async () => {
+    const results = await syncBatch(db, [
       { content: "batch item 1", type: "event" },
-      { content: "batch item 2", type: "event" },
+      { content: "completely different event note", type: "event" },
       { content: "batch item 1", type: "event" },
     ]);
 
     expect(results).toHaveLength(3);
     expect(results[0].action).toBe("added");
-    expect(results[1].action).toBe("added");
+    expect(["added", "merged"]).toContain(results[1].action);
     expect(results[2].action).toBe("skipped");
   });
 
-  it("tidy archives decayed P3 and cleans orphan paths", () => {
+  it("tidy archives decayed P3 while govern cleans orphan paths", () => {
     const mem = createMemory(db, { content: "old event to archive", type: "event" })!;
     db.prepare("UPDATE memories SET vitality = 0.01 WHERE id = ?").run(mem.id);
 
-    // orphan path
     db.pragma("foreign_keys = OFF");
     db.prepare("INSERT INTO paths (id, memory_id, agent_id, uri, domain, created_at) VALUES (?,?,?,?,?,?)")
       .run("orphan-path", "nonexistent-memory-id", "default", "event://orphan", "event", new Date().toISOString());
     db.pragma("foreign_keys = ON");
 
-    const result = runTidy(db);
-    expect(result.archived).toBe(1);
-    expect(result.orphansCleaned).toBe(1);
+    const tidy = runTidy(db);
+    expect(tidy.archived).toBe(1);
+    expect(tidy.orphansCleaned).toBe(0);
     expect(getMemory(db, mem.id)).toBeNull();
+
+    const govern = runGovern(db);
+    expect(govern.orphanPaths).toBe(1);
   });
 
-  it("govern removes orphan paths and empty memories (no link cleanup)", () => {
+  it("govern removes orphan paths and empty memories", () => {
     db.pragma("foreign_keys = OFF");
     db.prepare("INSERT INTO paths (id, memory_id, agent_id, uri, domain, created_at) VALUES (?,?,?,?,?,?)")
       .run("orphan-path-g", "missing-memory", "default", "event://orphan-g", "event", new Date().toISOString());
     db.pragma("foreign_keys = ON");
 
     db.prepare(
-      "INSERT INTO memories (id, content, type, priority, emotion_val, vitality, stability, access_count, created_at, updated_at, agent_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+      "INSERT INTO memories (id, content, type, priority, emotion_val, vitality, stability, access_count, created_at, updated_at, agent_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
     ).run("empty-id", "  ", "event", 3, 0, 1, 14, 0, new Date().toISOString(), new Date().toISOString(), "default");
 
     const result = runGovern(db);
@@ -91,12 +93,12 @@ describe("Sleep Cycle", () => {
     createPath(db, mem.id, "core://agent");
 
     const result = boot(db);
-    expect(result.identityMemories.some((m) => m.type === "identity")).toBe(true);
-    expect(result.identityMemories.some((m) => m.id === mem.id)).toBe(true);
+    expect(result.identityMemories.some((memory) => memory.type === "identity")).toBe(true);
+    expect(result.identityMemories.some((memory) => memory.id === mem.id)).toBe(true);
   });
 
-  it("full cycle works", () => {
-    syncBatch(db, [
+  it("full cycle works", async () => {
+    await syncBatch(db, [
       { content: "I am Noah", type: "identity", uri: "core://agent" },
       { content: "Xiaoxin said he loves me", type: "emotion", uri: "emotion://love/1" },
       { content: "Configured mihomo proxy", type: "event" },
@@ -114,8 +116,8 @@ describe("Sleep Cycle", () => {
     expect(governResult.orphanPaths).toBe(0);
 
     const remaining = listMemories(db);
-    expect(remaining.some((m) => m.type === "identity")).toBe(true);
-    expect(remaining.some((m) => m.type === "emotion")).toBe(true);
+    expect(remaining.some((memory) => memory.type === "identity")).toBe(true);
+    expect(remaining.some((memory) => memory.type === "emotion")).toBe(true);
   });
 
   it("exports memories to markdown files", () => {

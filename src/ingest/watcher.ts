@@ -58,11 +58,10 @@ export function runAutoIngestWatcher(options: AutoIngestWatcherOptions): AutoIng
 
     const rel = relative(memoryDir, absPath).replace(/\\/g, "/");
     if (rel.startsWith("..") || rel === "") return false;
-    // Only track memory/*.md (non-recursive), as requested.
     return !rel.includes("/");
   };
 
-  const ingestFile = (absPath: string, reason: string): void => {
+  const ingestFile = async (absPath: string, reason: string): Promise<void> => {
     if (stopped) return;
 
     if (!existsSync(absPath)) {
@@ -84,7 +83,7 @@ export function runAutoIngestWatcher(options: AutoIngestWatcherOptions): AutoIng
     try {
       const text = readFileSync(absPath, "utf-8");
       const source = toSource(absPath);
-      const result = ingestText(options.db, {
+      const result = await ingestText(options.db, {
         text,
         source,
         agentId: options.agentId,
@@ -117,9 +116,7 @@ export function runAutoIngestWatcher(options: AutoIngestWatcherOptions): AutoIng
       timers.delete(absPath);
 
       queue = queue
-        .then(() => {
-          ingestFile(absPath, reason);
-        })
+        .then(() => ingestFile(absPath, reason))
         .catch((err) => {
           stats.errors += 1;
           logger.error(`[auto-ingest] queue error: ${String(err)}`);

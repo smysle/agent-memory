@@ -127,14 +127,14 @@ describe("AgentMemory Core", () => {
     expect(paths).toHaveLength(2);
   });
 
-  it("guard detects duplicates and URI conflicts", () => {
+  it("guard detects duplicates and URI conflicts", async () => {
     createMemory(db, { content: "duplicate test", type: "event" });
-    const duplicate = guard(db, { content: "duplicate test", type: "event" });
+    const duplicate = await guard(db, { content: "duplicate test", type: "event" });
     expect(duplicate.action).toBe("skip");
 
     const mem = createMemory(db, { content: "existing", type: "identity" })!;
     createPath(db, mem.id, "core://agent/name");
-    const conflict = guard(db, { content: "new content", type: "identity", uri: "core://agent/name" });
+    const conflict = await guard(db, { content: "new content", type: "identity", uri: "core://agent/name" });
     expect(conflict.action).toBe("update");
     expect(conflict.existingId).toBe(mem.id);
   });

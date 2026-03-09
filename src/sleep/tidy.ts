@@ -1,5 +1,5 @@
-// AgentMemory v3 — Sleep tidy engine (deep sleep phase)
-// Compresses, distills, archives old memories
+// AgentMemory v4 — Sleep tidy engine (deep sleep phase)
+// Compression / merge / archive only. Governance belongs in govern.ts.
 import type Database from "better-sqlite3";
 import { deleteMemory } from "../core/memory.js";
 import { getDecayedMemories } from "./decay.js";
@@ -12,7 +12,8 @@ export interface TidyResult {
 /**
  * Run the tidy (deep sleep) cycle:
  * 1. Archive decayed P3 memories (vitality < threshold)
- * 2. Clean orphan paths (paths with no memory)
+ *
+ * Path/orphan cleanup moved to govern.ts in Phase 2.
  */
 export function runTidy(
   db: Database.Database,
@@ -25,30 +26,16 @@ export function runTidy(
   const agentId = opts?.agent_id;
 
   let archived = 0;
-  let orphansCleaned = 0;
 
   const transaction = db.transaction(() => {
-    // 1. Archive decayed memories
     const decayed = getDecayedMemories(db, threshold, agentId ? { agent_id: agentId } : undefined);
     for (const mem of decayed) {
       deleteMemory(db, mem.id);
-      archived++;
+      archived += 1;
     }
-
-    // 2. Clean orphan paths (paths pointing to deleted memories)
-    const orphans = agentId
-      ? db.prepare(
-        `DELETE FROM paths
-         WHERE agent_id = ?
-           AND memory_id NOT IN (SELECT id FROM memories WHERE agent_id = ?)`,
-      ).run(agentId, agentId)
-      : db.prepare(
-        "DELETE FROM paths WHERE memory_id NOT IN (SELECT id FROM memories)",
-      ).run();
-    orphansCleaned = orphans.changes;
   });
 
   transaction();
 
-  return { archived, orphansCleaned };
+  return { archived, orphansCleaned: 0 };
 }

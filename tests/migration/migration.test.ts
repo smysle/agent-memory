@@ -109,12 +109,16 @@ describe("Schema migration", () => {
     const db = openDatabase({ path: TEST_DB });
 
     const version = (db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined)?.value;
-    expect(version).toBe("4");
+    expect(version).toBe("5");
 
     const embeddingsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='embeddings'").get() as { name: string } | undefined;
+    const maintenanceJobsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='maintenance_jobs'").get() as { name: string } | undefined;
+    const feedbackEventsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='feedback_events'").get() as { name: string } | undefined;
     const linksTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='links'").get() as { name: string } | undefined;
     const snapshotsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='snapshots'").get() as { name: string } | undefined;
     expect(Boolean(embeddingsTable?.name)).toBe(true);
+    expect(Boolean(maintenanceJobsTable?.name)).toBe(true);
+    expect(Boolean(feedbackEventsTable?.name)).toBe(true);
     expect(Boolean(linksTable?.name)).toBe(true);
     expect(Boolean(snapshotsTable?.name)).toBe(true);
 

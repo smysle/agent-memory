@@ -24,7 +24,7 @@ describe("ingest tool core behavior", () => {
     try { unlinkSync(TEST_DB + "-shm"); } catch {}
   });
 
-  it("dry_run extracts without writing", () => {
+  it("dry_run extracts without writing", async () => {
     const before = countMemories(db).total;
 
     const markdown = [
@@ -38,7 +38,7 @@ describe("ingest tool core behavior", () => {
       "- 2026-02-24 完成修复",
     ].join("\n");
 
-    const result = ingestText(db, {
+    const result = await ingestText(db, {
       text: markdown,
       source: "memory/2026-02-24.md",
       dryRun: true,
@@ -53,7 +53,7 @@ describe("ingest tool core behavior", () => {
     expect(after).toBe(before);
   });
 
-  it("writes extracted memories with auto:source marker", () => {
+  it("writes extracted memories with auto:source marker", async () => {
     const markdown = [
       "## 情感",
       "- 开心到想记录一下",
@@ -65,7 +65,7 @@ describe("ingest tool core behavior", () => {
       "- 2026-02-24 部署完成",
     ].join("\n");
 
-    const result = ingestText(db, {
+    const result = await ingestText(db, {
       text: markdown,
       source: "memory/2026-02-24.md",
       dryRun: false,

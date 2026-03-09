@@ -2,7 +2,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const SCHEMA_SQL = `
 -- Memory entries
@@ -76,6 +76,26 @@ CREATE TABLE IF NOT EXISTS embeddings (
   UNIQUE(memory_id, provider_id)
 );
 
+-- Maintenance jobs (reflect / reindex checkpoints)
+CREATE TABLE IF NOT EXISTS maintenance_jobs (
+  job_id       TEXT PRIMARY KEY,
+  phase        TEXT NOT NULL CHECK(phase IN ('decay','tidy','govern','all')),
+  status       TEXT NOT NULL CHECK(status IN ('running','completed','failed')),
+  checkpoint   TEXT,
+  error        TEXT,
+  started_at   TEXT NOT NULL,
+  finished_at  TEXT
+);
+
+-- Feedback signals (reserved for future ranking / governance)
+CREATE TABLE IF NOT EXISTS feedback_events (
+  id           TEXT PRIMARY KEY,
+  memory_id    TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  event_type   TEXT NOT NULL,
+  value        REAL NOT NULL DEFAULT 1.0,
+  created_at   TEXT NOT NULL
+);
+
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_meta (
   key   TEXT PRIMARY KEY,
@@ -90,6 +110,8 @@ CREATE INDEX IF NOT EXISTS idx_memories_vitality ON memories(vitality);
 CREATE INDEX IF NOT EXISTS idx_memories_hash ON memories(hash);
 CREATE INDEX IF NOT EXISTS idx_paths_memory ON paths(memory_id);
 CREATE INDEX IF NOT EXISTS idx_paths_domain ON paths(domain);
+CREATE INDEX IF NOT EXISTS idx_maintenance_jobs_phase_status ON maintenance_jobs(phase, status, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_feedback_events_memory ON feedback_events(memory_id, created_at DESC);
 `;
 
 export interface DbOptions {
@@ -188,6 +210,11 @@ function migrateDatabase(db: Database.Database, from: number, to: number): void 
     if (v === 3) {
       migrateV3ToV4(db);
       v = 4;
+      continue;
+    }
+    if (v === 4) {
+      migrateV4ToV5(db);
+      v = 5;
       continue;
     }
     throw new Error(`Unsupported schema migration path: v${from} → v${to} (stuck at v${v})`);
@@ -295,7 +322,10 @@ function inferSchemaVersion(db: Database.Database): number {
     && tableHasColumn(db, "embeddings", "status")
     && tableHasColumn(db, "embeddings", "content_hash")
     && tableHasColumn(db, "embeddings", "id");
+  const hasMaintenanceJobs = tableExists(db, "maintenance_jobs");
+  const hasFeedbackEvents = tableExists(db, "feedback_events");
 
+  if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings && hasMaintenanceJobs && hasFeedbackEvents) return 5;
   if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings) return 4;
   if (hasAgentScopedPaths && hasAgentScopedLinks && hasEmbeddings) return 3;
   if (hasAgentScopedPaths && hasAgentScopedLinks) return 2;
@@ -319,6 +349,12 @@ function ensureIndexes(db: Database.Database): void {
       db.exec("CREATE INDEX IF NOT EXISTS idx_embeddings_agent_model ON embeddings(agent_id, model);");
       db.exec("CREATE INDEX IF NOT EXISTS idx_embeddings_memory ON embeddings(memory_id);");
     }
+  }
+  if (tableExists(db, "maintenance_jobs")) {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_maintenance_jobs_phase_status ON maintenance_jobs(phase, status, started_at DESC);");
+  }
+  if (tableExists(db, "feedback_events")) {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_feedback_events_memory ON feedback_events(memory_id, created_at DESC);");
   }
 }
 
@@ -397,6 +433,45 @@ function migrateV3ToV4(db: Database.Database): void {
     db.exec("ALTER TABLE embeddings_v4 RENAME TO embeddings;");
 
     db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'version'").run(String(4));
+    db.exec("COMMIT");
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw e;
+  }
+}
+
+function migrateV4ToV5(db: Database.Database): void {
+  const hasMaintenanceJobs = tableExists(db, "maintenance_jobs");
+  const hasFeedbackEvents = tableExists(db, "feedback_events");
+
+  if (hasMaintenanceJobs && hasFeedbackEvents) {
+    db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'version'").run(String(5));
+    return;
+  }
+
+  try {
+    db.exec("BEGIN");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS maintenance_jobs (
+        job_id       TEXT PRIMARY KEY,
+        phase        TEXT NOT NULL CHECK(phase IN ('decay','tidy','govern','all')),
+        status       TEXT NOT NULL CHECK(status IN ('running','completed','failed')),
+        checkpoint   TEXT,
+        error        TEXT,
+        started_at   TEXT NOT NULL,
+        finished_at  TEXT
+      );
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS feedback_events (
+        id           TEXT PRIMARY KEY,
+        memory_id    TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        event_type   TEXT NOT NULL,
+        value        REAL NOT NULL DEFAULT 1.0,
+        created_at   TEXT NOT NULL
+      );
+    `);
+    db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'version'").run(String(5));
     db.exec("COMMIT");
   } catch (e) {
     try { db.exec("ROLLBACK"); } catch {}

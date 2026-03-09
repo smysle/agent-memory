@@ -11,7 +11,8 @@ export {
   createPath, getPath, getPathByUri, getPathsByMemory, getPathsByDomain, getPathsByPrefix,
   deletePath, parseUri, type Path,
 } from "./core/path.js";
-export { guard, type GuardResult, type GuardAction } from "./core/guard.js";
+export { guard, type GuardResult, type GuardAction, type GuardInput, type DedupScoreBreakdown } from "./core/guard.js";
+export { buildMergePlan, type MergePlan, type MergeContext } from "./core/merge.js";
 export { exportMemories, type ExportResult } from "./core/export.js";
 
 // Search
@@ -79,5 +80,20 @@ export { runAutoIngestWatcher, type AutoIngestWatcherOptions, type AutoIngestWat
 export { calculateVitality, runDecay, getDecayedMemories } from "./sleep/decay.js";
 export { syncOne, syncBatch, type SyncInput, type SyncResult } from "./sleep/sync.js";
 export { runTidy, type TidyResult } from "./sleep/tidy.js";
-export { runGovern, type GovernResult } from "./sleep/govern.js";
+export { runGovern, rankEvictionCandidates, computeEvictionScore, type GovernResult, type EvictionCandidate } from "./sleep/govern.js";
 export { boot, type BootResult } from "./sleep/boot.js";
+export {
+  createMaintenanceJob,
+  getMaintenanceJob,
+  findResumableMaintenanceJob,
+  updateMaintenanceCheckpoint,
+  failMaintenanceJob,
+  completeMaintenanceJob,
+  createInitialCheckpoint,
+  type MaintenanceJob,
+  type MaintenancePhase,
+  type MaintenanceStatus,
+  type ReflectCheckpoint,
+  type ReflectStep,
+} from "./sleep/jobs.js";
+export { runReflectOrchestrator, type ReflectOptions, type ReflectRunResult, type ReflectRunners, type ReflectStats } from "./sleep/orchestrator.js";
