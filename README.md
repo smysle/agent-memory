@@ -126,9 +126,17 @@ flowchart TD
     end
 ```
 
+<p align="center">
+  <img src="docs/assets/architecture-diagram.jpg" alt="Architecture Overview" width="800" />
+</p>
+
 See [docs/architecture.md](docs/architecture.md) for a deeper breakdown.
 
 ## 5) What is the shortest 5-minute setup?
+
+<p align="center">
+  <img src="docs/assets/npm-badge.jpg" alt="npm install @smyslenny/agent-memory" width="500" />
+</p>
 
 Choose the integration path that matches your runtime.
 
