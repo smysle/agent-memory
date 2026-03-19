@@ -1,11 +1,12 @@
 import {
+  createGeminiEmbeddingProvider,
   createLocalHttpEmbeddingProvider,
   createOpenAICompatibleEmbeddingProvider,
   normalizeEmbeddingBaseUrl,
   type EmbeddingProvider,
 } from "./embedding.js";
 
-export type EmbeddingProviderKind = "openai-compatible" | "local-http";
+export type EmbeddingProviderKind = "openai-compatible" | "local-http" | "gemini";
 
 export interface EmbeddingProviderConfig {
   provider: EmbeddingProviderKind;
@@ -29,7 +30,7 @@ function parseDimension(raw: string | undefined): number | undefined {
 
 function parseProvider(raw: string | undefined): EmbeddingProviderKind | null {
   if (!raw) return null;
-  if (raw === "openai-compatible" || raw === "local-http") {
+  if (raw === "openai-compatible" || raw === "local-http" || raw === "gemini") {
     return raw;
   }
   throw new Error(`Unsupported embedding provider: ${raw}`);
@@ -43,8 +44,8 @@ export function getEmbeddingProviderConfigFromEnv(env: NodeJS.ProcessEnv = proce
   const model = env.AGENT_MEMORY_EMBEDDING_MODEL;
   const dimension = parseDimension(env.AGENT_MEMORY_EMBEDDING_DIMENSION);
 
-  if (!baseUrl) {
-    throw new Error("AGENT_MEMORY_EMBEDDING_BASE_URL is required when embeddings are enabled");
+  if (!baseUrl && provider !== "gemini") {
+    throw new Error("AGENT_MEMORY_EMBEDDING_BASE_URL is required when embeddings are enabled (not needed for gemini provider)");
   }
   if (!model) {
     throw new Error("AGENT_MEMORY_EMBEDDING_MODEL is required when embeddings are enabled");
@@ -55,10 +56,13 @@ export function getEmbeddingProviderConfigFromEnv(env: NodeJS.ProcessEnv = proce
   if (provider === "openai-compatible" && !env.AGENT_MEMORY_EMBEDDING_API_KEY) {
     throw new Error("AGENT_MEMORY_EMBEDDING_API_KEY is required for openai-compatible providers");
   }
+  if (provider === "gemini" && !env.AGENT_MEMORY_EMBEDDING_API_KEY) {
+    throw new Error("AGENT_MEMORY_EMBEDDING_API_KEY is required for gemini provider (Google AI API key)");
+  }
 
   return {
     provider,
-    baseUrl,
+    baseUrl: baseUrl ?? "",
     model,
     dimension,
     apiKey: env.AGENT_MEMORY_EMBEDDING_API_KEY,
@@ -71,8 +75,17 @@ export function createEmbeddingProvider(
 ): EmbeddingProvider {
   const normalized = {
     ...input,
-    baseUrl: normalizeEmbeddingBaseUrl(input.baseUrl),
+    baseUrl: input.baseUrl ? normalizeEmbeddingBaseUrl(input.baseUrl) : "",
   };
+
+  if (normalized.provider === "gemini") {
+    return createGeminiEmbeddingProvider({
+      model: normalized.model,
+      dimension: normalized.dimension,
+      apiKey: normalized.apiKey!,
+      fetchImpl: opts?.fetchImpl,
+    });
+  }
 
   if (normalized.provider === "openai-compatible") {
     return createOpenAICompatibleEmbeddingProvider({
@@ -104,14 +117,17 @@ export function resolveEmbeddingProviderConfig(opts?: { config?: Partial<Embeddi
   const dimension = opts?.config?.dimension ?? envConfig?.dimension;
   const apiKey = opts?.config?.apiKey ?? envConfig?.apiKey;
 
-  if (!provider || !baseUrl || !model || !dimension) {
+  if (!provider || !model || !dimension) {
     throw new Error("Incomplete embedding provider configuration");
   }
-  if (provider === "openai-compatible" && !apiKey) {
-    throw new Error("OpenAI-compatible embedding providers require an API key");
+  if (provider !== "gemini" && !baseUrl) {
+    throw new Error("baseUrl is required for non-gemini embedding providers");
+  }
+  if ((provider === "openai-compatible" || provider === "gemini") && !apiKey) {
+    throw new Error(`${provider} embedding provider requires an API key`);
   }
 
-  return { provider, baseUrl, model, dimension, apiKey };
+  return { provider, baseUrl: baseUrl ?? "", model, dimension, apiKey };
 }
 
 export function getEmbeddingProvider(opts?: EmbeddingProviderFactoryOptions): EmbeddingProvider | null {

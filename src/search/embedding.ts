@@ -165,6 +165,57 @@ export function createLocalHttpEmbeddingProvider(opts: EmbeddingProviderOptions)
   };
 }
 
+export interface GeminiEmbeddingProviderOptions {
+  model: string;
+  dimension: number;
+  apiKey: string;
+  fetchImpl?: typeof fetch;
+}
+
+export function createGeminiEmbeddingProvider(opts: GeminiEmbeddingProviderOptions): EmbeddingProvider {
+  const id = stableProviderId(`gemini:${opts.model}`, `${opts.model}|${opts.dimension}`);
+
+  return {
+    id,
+    model: opts.model,
+    dimension: opts.dimension,
+    async embed(texts: string[]): Promise<number[][]> {
+      if (texts.length === 0) return [];
+      const fetchFn = getFetch(opts.fetchImpl);
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:batchEmbedContents?key=${opts.apiKey}`;
+      const requests = texts.map((text) => ({
+        model: `models/${opts.model}`,
+        content: { parts: [{ text }] },
+        outputDimensionality: opts.dimension,
+      }));
+
+      const response = await fetchFn(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ requests }),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(`Gemini embedding request failed: ${response.status} ${response.statusText}${detail ? ` — ${detail}` : ""}`);
+      }
+
+      const json = (await response.json()) as { embeddings?: Array<{ values?: unknown }> };
+      const embeddings = json?.embeddings;
+      if (!Array.isArray(embeddings)) {
+        throw new Error("Gemini embedding response missing embeddings array");
+      }
+
+      return embeddings.map((entry, index) =>
+        assertEmbeddingVector(entry?.values, opts.dimension, `Gemini embedding item ${index}`),
+      );
+    },
+    async healthcheck(): Promise<void> {
+      await this.embed(["healthcheck"]);
+    },
+  };
+}
+
 export function normalizeEmbeddingBaseUrl(baseUrl: string): string {
   return trimTrailingSlashes(baseUrl);
 }
