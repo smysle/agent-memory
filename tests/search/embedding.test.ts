@@ -117,4 +117,25 @@ describe("embedding providers", () => {
     expect(provider!.dimension).toBe(3072);
     expect(provider!.id).toContain("gemini:");
   });
+
+  it("supports custom baseUrl for gemini provider", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      embeddings: [{ values: [0.1, 0.2] }],
+    }), { status: 200 }));
+
+    const provider = createGeminiEmbeddingProvider({
+      model: "gemini-embedding-2-preview",
+      dimension: 2,
+      apiKey: "test-key",
+      baseUrl: "https://my-proxy.example.com",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    await provider.embed(["test"]);
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("my-proxy.example.com");
+    expect(url).toContain("/v1beta/models/gemini-embedding-2-preview:batchEmbedContents");
+    expect(url).not.toContain("generativelanguage.googleapis.com");
+  });
 });

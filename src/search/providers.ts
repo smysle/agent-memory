@@ -83,6 +83,7 @@ export function createEmbeddingProvider(
       model: normalized.model,
       dimension: normalized.dimension,
       apiKey: normalized.apiKey!,
+      baseUrl: normalized.baseUrl || undefined,
       fetchImpl: opts?.fetchImpl,
     });
   }

@@ -169,11 +169,16 @@ export interface GeminiEmbeddingProviderOptions {
   model: string;
   dimension: number;
   apiKey: string;
+  baseUrl?: string;
   fetchImpl?: typeof fetch;
 }
 
+const GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
+
 export function createGeminiEmbeddingProvider(opts: GeminiEmbeddingProviderOptions): EmbeddingProvider {
-  const id = stableProviderId(`gemini:${opts.model}`, `${opts.model}|${opts.dimension}`);
+  const baseUrl = trimTrailingSlashes(opts.baseUrl || GEMINI_DEFAULT_BASE_URL);
+  const descriptorInput = `${baseUrl}|${opts.model}|${opts.dimension}`;
+  const id = stableProviderId(`gemini:${opts.model}`, descriptorInput);
 
   return {
     id,
@@ -182,7 +187,7 @@ export function createGeminiEmbeddingProvider(opts: GeminiEmbeddingProviderOptio
     async embed(texts: string[]): Promise<number[][]> {
       if (texts.length === 0) return [];
       const fetchFn = getFetch(opts.fetchImpl);
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:batchEmbedContents?key=${opts.apiKey}`;
+      const url = `${baseUrl}/v1beta/models/${opts.model}:batchEmbedContents?key=${opts.apiKey}`;
       const requests = texts.map((text) => ({
         model: `models/${opts.model}`,
         content: { parts: [{ text }] },
