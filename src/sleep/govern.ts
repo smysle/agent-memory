@@ -125,13 +125,16 @@ export function rankEvictionCandidates(
  * 1. Remove orphan paths (no parent memory)
  * 2. Remove empty memories (blank content)
  * 3. Evict low-value memories when over capacity using eviction_score
+ *
+ * maxMemories can be set via AGENT_MEMORY_MAX_MEMORIES env var (default: 200).
  */
 export function runGovern(
   db: Database.Database,
   opts?: { agent_id?: string; maxMemories?: number },
 ): GovernResult {
   const agentId = opts?.agent_id;
-  const maxMemories = opts?.maxMemories ?? 200;
+  const envMax = Number.parseInt(process.env.AGENT_MEMORY_MAX_MEMORIES ?? "", 10);
+  const maxMemories = opts?.maxMemories ?? (Number.isFinite(envMax) && envMax > 0 ? envMax : 200);
   let orphanPaths = 0;
   let emptyMemories = 0;
   let evicted = 0;

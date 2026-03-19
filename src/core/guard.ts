@@ -215,11 +215,14 @@ function fourCriterionGate(input: CreateMemoryInput): GateResult {
   const failed: string[] = [];
 
   // --- Specificity: content has enough substance ---
-  // Minimum length varies by priority: P0/P1 can be shorter
+  // Minimum length varies by priority: P0/P1 can be shorter, P2/P3 need more substance.
+  // CJK characters carry ~3x the information density of ASCII, so we count them accordingly.
   const priority = input.priority ?? (input.type === "identity" ? 0 : input.type === "emotion" ? 1 : input.type === "knowledge" ? 2 : 3);
-  const minLength = priority <= 1 ? 4 : 8;
-  const specificity = content.length >= minLength ? Math.min(1, content.length / 50) : 0;
-  if (specificity === 0) failed.push(`specificity (too short: ${content.length} < ${minLength} chars)`);
+  const cjkCount = (content.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) ?? []).length;
+  const effectiveLength = content.length + cjkCount * 2; // CJK chars count as 3 effective chars
+  const minLength = priority <= 1 ? 4 : 20;
+  const specificity = effectiveLength >= minLength ? Math.min(1, effectiveLength / 50) : 0;
+  if (specificity === 0) failed.push(`specificity (too short: effective ${effectiveLength} < ${minLength} chars)`);
 
   // --- Novelty: content has information, not just stopwords/filler ---
   const tokens = tokenize(content);

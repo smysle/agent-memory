@@ -122,7 +122,8 @@ export function runDecay(
 
 /**
  * Get memories that are candidates for cleanup (vitality < threshold).
- * Only P3 (event) memories can be fully cleaned.
+ * P2 (knowledge) and P3 (event) memories can be cleaned when decayed.
+ * P0 (identity) never decays; P1 (emotion) has min vitality 0.3.
  */
 export function getDecayedMemories(
   db: Database.Database,
@@ -134,10 +135,10 @@ export function getDecayedMemories(
     .prepare(
       agentId
         ? `SELECT id, content, vitality, priority FROM memories
-           WHERE vitality < ? AND priority >= 3 AND agent_id = ?
+           WHERE vitality < ? AND priority >= 2 AND agent_id = ?
            ORDER BY vitality ASC`
         : `SELECT id, content, vitality, priority FROM memories
-           WHERE vitality < ? AND priority >= 3
+           WHERE vitality < ? AND priority >= 2
            ORDER BY vitality ASC`,
     )
     .all(...(agentId ? [threshold, agentId] : [threshold])) as Array<{

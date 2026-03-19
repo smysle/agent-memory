@@ -43,9 +43,9 @@ describe("Sleep Cycle", () => {
 
   it("syncBatch processes multiple items", async () => {
     const results = await syncBatch(db, [
-      { content: "batch item 1", type: "event" },
-      { content: "completely different event note", type: "event" },
-      { content: "batch item 1", type: "event" },
+      { content: "batch item number one: deployed the application to production server", type: "event" },
+      { content: "completely different event note about a deployment failure", type: "event" },
+      { content: "batch item number one: deployed the application to production server", type: "event" },
     ]);
 
     expect(results).toHaveLength(3);

@@ -1,5 +1,43 @@
 # Changelog
 
+## 4.2.0 (2026-03-19)
+
+### 🛡️ Anti-Noise Hardening
+
+This release addresses the "heartbeat flood" problem where memory-sync cron
+ingested hundreds of low-value status observations (e.g. "HEARTBEAT_OK",
+"安静模式", "PR 无变化") into the curated memory store.
+
+#### Guard improvements
+- **Raised specificity threshold** for P2/P3 memories from 8 to 20 effective
+  characters
+- **CJK-aware length calculation**: CJK characters count as 3 effective chars
+  (reflecting their higher information density vs ASCII), preventing false
+  rejections of legitimate Chinese content
+
+#### Ingest noise filter
+- Added `isIngestNoise()` pre-filter in `extractIngestItems()` that skips lines
+  matching known noise patterns before they reach the Write Guard:
+  - Heartbeat status: `HEARTBEAT_OK`, `安静模式`, `不打扰`, `继续安静待命`
+  - Empty deltas: `无新 delta`, `无变化`, `无紧急`, `无新进展`
+  - System dumps: `openclaw status`, `openclaw gateway status`, `session_status`
+  - Stale PR observations: `PR #NNN 无变化`, `基线未变`, `轻量复查`
+  - Cron noise: `cron 会话`, `距上次心跳`, `危险区协议`
+
+#### Tidy expansion
+- `getDecayedMemories()` now includes **P2 (knowledge)** in cleanup candidates
+  (previously only P3 event). This means decayed low-vitality knowledge entries
+  will be cleaned up during sleep tidy, not just events.
+
+#### Govern env config
+- `maxMemories` can now be set via `AGENT_MEMORY_MAX_MEMORIES` environment
+  variable (default: 200)
+
+### ✅ Tests
+- 66 tests passing (19 files)
+- Added `tests/ingest/noise-filter.test.ts` covering heartbeat noise rejection,
+  meaningful content preservation, and mixed signal/noise handling
+
 ## 4.0.0-alpha.1 (2026-03-09)
 
 ### 🚀 Repositioning

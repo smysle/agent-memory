@@ -82,6 +82,9 @@ export function extractIngestItems(text: string, source?: string): IngestExtract
     const lines = bulletItems.length > 0 ? bulletItems : [block.body.trim()];
 
     for (const line of lines) {
+      // Skip low-value status observations that pollute the memory store
+      if (isIngestNoise(line)) continue;
+
       index += 1;
       const uri = type === "identity"
         ? `core://ingest/${slugify(block.title)}/${index}`
@@ -97,6 +100,38 @@ export function extractIngestItems(text: string, source?: string): IngestExtract
   }
 
   return items;
+}
+
+/**
+ * Noise filter: skip heartbeat observations, status dumps, and other
+ * ephemeral status lines that should stay in daily markdown, not in
+ * the curated memory store.
+ */
+const NOISE_PATTERNS: RegExp[] = [
+  /HEARTBEAT_OK/i,
+  /安静模式/,
+  /安静待命/,
+  /不打扰/,
+  /无新.{0,4}(delta|变化|事项|进展)/,
+  /无变化/,
+  /无紧急/,
+  /深夜时段/,
+  /继续安静/,
+  /openclaw (status|gateway status|security audit|update status)/i,
+  /session_status/,
+  /危险区协议/,
+  /没有紧急/,
+  /没有新增状态变化/,
+  /仍为.*critical/,
+  /基线(未变|不变|仍)/,
+  /PR\s*#\d+\s*(无变化|状态无变化)/,
+  /距上次心跳/,
+  /轻量复查/,
+  /cron 会话.*\d+k/,
+];
+
+function isIngestNoise(content: string): boolean {
+  return NOISE_PATTERNS.some((pattern) => pattern.test(content));
 }
 
 export async function ingestText(db: Database.Database, options: IngestRunOptions): Promise<IngestResult> {
