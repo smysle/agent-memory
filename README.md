@@ -22,7 +22,7 @@ AgentMemory is a SQLite-first memory layer for AI agents. It lets an agent:
 - **maintain** them over time with `reflect`, `reindex`, and feedback signals
 - **integrate** through **CLI**, **MCP stdio**, or **HTTP/SSE**
 
-Current release: **`4.0.0-alpha.1`**.
+Current release: **`4.2.0`**.
 
 Without an embedding provider, AgentMemory still works in **BM25-only mode**.
 With one configured, it adds **hybrid recall** and **semantic dedup**.
