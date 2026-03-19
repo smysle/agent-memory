@@ -102,7 +102,7 @@ describe("reflect orchestrator", () => {
   it("prioritizes high-redundancy low-value memories for eviction", () => {
     const noisy = createMemory(db, { content: "部署 reflect orchestrator", type: "event" })!;
     const duplicate = createMemory(db, { content: "再次部署 reflect orchestrator", type: "event" })!;
-    const valuable = createMemory(db, { content: "核心身份：小心是唯一契约者", type: "knowledge" })!;
+    const valuable = createMemory(db, { content: "Core identity: Alice is the sole contractor", type: "knowledge" })!;
 
     db.prepare("UPDATE memories SET vitality = 0.15, created_at = '2024-01-01T00:00:00.000Z' WHERE id = ?").run(noisy.id);
     db.prepare("UPDATE memories SET vitality = 0.25, created_at = '2024-02-01T00:00:00.000Z' WHERE id = ?").run(duplicate.id);

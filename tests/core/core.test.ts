@@ -26,13 +26,13 @@ describe("AgentMemory Core", () => {
   });
 
   it("creates and retrieves a memory", () => {
-    const mem = createMemory(db, { content: "小心是我的契约者", type: "identity" });
+    const mem = createMemory(db, { content: "Alice is my contractor", type: "identity" });
     expect(mem).not.toBeNull();
     expect(mem!.type).toBe("identity");
     expect(mem!.priority).toBe(0);
 
     const fetched = getMemory(db, mem!.id);
-    expect(fetched?.content).toBe("小心是我的契约者");
+    expect(fetched?.content).toBe("Alice is my contractor");
   });
 
   it("deduplicates identical content", () => {

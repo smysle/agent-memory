@@ -99,10 +99,10 @@ describe("semantic guard pipeline", () => {
   });
 
   it("skips exact duplicates before semantic scoring", async () => {
-    createMemory(db, { content: "小心喜欢低饱和界面", type: "identity" });
+    createMemory(db, { content: "Alice prefers low-saturation UI", type: "identity" });
 
     const result = await guard(db, {
-      content: "小心喜欢低饱和界面",
+      content: "Alice prefers low-saturation UI",
       type: "identity",
     });
 

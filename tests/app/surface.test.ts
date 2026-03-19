@@ -39,7 +39,7 @@ describe("context-aware surface", () => {
   });
 
   it("uses query context to outrank static vitality/priority ordering", async () => {
-    const identity = createMemory(db, { content: "小心是唯一契约者", type: "identity" })!;
+    const identity = createMemory(db, { content: "Alice is the sole contractor", type: "identity" })!;
     const design = createMemory(db, { content: "UI 设计要克制低饱和，避免玻璃拟态", type: "knowledge" })!;
 
     const provider = createStubProvider({

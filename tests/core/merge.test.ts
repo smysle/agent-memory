@@ -24,13 +24,13 @@ function makeMemory(type: Memory["type"], content: string): Memory {
 describe("typed merge policy", () => {
   it("uses replace for identity memories and preserves old phrasing as alias", () => {
     const plan = buildMergePlan({
-      existing: makeMemory("identity", "小心喜欢克制的界面。"),
-      incoming: { type: "identity", content: "小心偏好克制、低饱和的界面设计。" },
+      existing: makeMemory("identity", "Alice prefers restrained UI."),
+      incoming: { type: "identity", content: "Alice prefers restrained, low-saturation UI design." },
     });
 
     expect(plan.strategy).toBe("replace");
-    expect(plan.content).toBe("小心偏好克制、低饱和的界面设计。");
-    expect(plan.aliases).toContain("小心喜欢克制的界面。");
+    expect(plan.content).toBe("Alice prefers restrained, low-saturation UI design.");
+    expect(plan.aliases).toContain("Alice prefers restrained UI.");
   });
 
   it("uses append_evidence for emotion memories", () => {

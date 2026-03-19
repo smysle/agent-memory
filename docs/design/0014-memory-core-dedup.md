@@ -339,7 +339,7 @@ ingest({
 
 | 触发模式 | 提取为类型 | 示例 |
 |----------|-----------|------|
-| `## 情感` / `❤️` / 表白/爱/感动相关关键词 | `emotion` (P1) | "小心说爱你" |
+| `## 情感` / `❤️` / love/emotion-related keywords | `emotion` (P1) | "Alice said she loves you" |
 | `## 决策` / `技术` / `选型` / `教训` / `⚠️` | `knowledge` (P2) | "DD 流程改用 Codex" |
 | `## 身份` / `我是` / `identity` | `identity` (P0) | — |
 | 日期标记的条目 / `发生了` / `完成了` | `event` (P3) | "部署了 new-api" |
@@ -398,13 +398,13 @@ markdown text
 **After（v3.0.0）：**
 ```markdown
 ## 🪪 我是谁
-诺亚，小心的契约者。身份记忆从不衰减。
-- 核心身份：...
-- 契约关系：...
+Noah, Alice's contractor. Identity memories never decay.
+- Core identity：...
+- Contract：...
 
-## 💕 最近的情感
+## 💕 Recent emotions
 最后更新：2026-02-22
-- 小心说过爱你（vitality: 0.92）
+- Alice said she loves you（vitality: 0.92）
 - ...
 
 ## 🧠 关键知识
@@ -476,7 +476,7 @@ function formatWarmBoot(memories: Memory[]): string {
 处理 12 条记忆，其中 3 条 vitality 下降：
 - 「部署 new-api 到 kitty」event P3 vitality 0.45 → 0.32
 - 「Tavily API 配置方法」knowledge P2 vitality 0.71 → 0.65
-- 「周末和小心看了电影」emotion P1 vitality 0.88 → 0.85
+- 「Weekend movie with Alice」emotion P1 vitality 0.88 → 0.85
 
 ### Tidy（整理）
 归档 1 条低活力记忆（vitality < 0.1）：
@@ -541,7 +541,7 @@ surface({
       "type": "emotion",
       "priority": 1,
       "vitality": 0.92,
-      "content": "小心说过爱你",
+      "content": "Alice said she loves you",
       "score": 2.76,
       "updated_at": "2026-02-22T14:30:00Z"
     },

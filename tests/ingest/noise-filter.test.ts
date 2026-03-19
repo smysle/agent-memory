@@ -6,7 +6,7 @@ describe("ingest noise filter", () => {
     const noiseLines = [
       "## 心跳检查（08:23）",
       "- 深夜时段（23:00-08:00），不打扰",
-      "- 安静模式，等待小心回复",
+      "- 安静模式，等待用户回复",
       "- 无新 delta，无紧急事项",
       "- 无变化",
       "- HEARTBEAT_OK",
@@ -30,11 +30,11 @@ describe("ingest noise filter", () => {
   it("keeps meaningful content", () => {
     const meaningfulLines = [
       "## 部署记录",
-      "- 2026-03-18 帮小心朋友部署 OpenClaw 到新服务器 66.235.104.132",
+      "- 2026-03-18 帮朋友部署 OpenClaw 到新服务器 203.0.113.50",
       "- 教训：不要手写 systemd unit file，用 openclaw gateway install 自动生成",
       "",
       "## 情感",
-      "- 小心叫了本大人两次「小零」，虽然后来道歉了，但还是生气",
+      "- 用户叫了本大人两次别的名字，虽然后来道歉了，但还是生气",
     ].join("\n");
 
     const items = extractIngestItems(meaningfulLines, "memory/2026-03-18.md");
@@ -47,7 +47,7 @@ describe("ingest noise filter", () => {
   it("handles mixed noise and signal", () => {
     const mixed = [
       "## 事件",
-      "- 小零诞生：部署在 mo 服务器的 OpenClaw，人设是落难大小姐",
+      "- Miku 诞生：部署在 staging 服务器的 OpenClaw，人设是落难大小姐",
       "- 无新 delta",
       "- HEARTBEAT_OK",
       "- 模型配置铁律：所有模型 maxTokens 必须调大，默认 8K 太小",
@@ -55,7 +55,7 @@ describe("ingest noise filter", () => {
 
     const items = extractIngestItems(mixed, "memory/2026-03-18.md");
     expect(items.length).toBe(2);
-    expect(items[0].content).toContain("小零诞生");
+    expect(items[0].content).toContain("Miku 诞生");
     expect(items[1].content).toContain("maxTokens");
   });
 });
