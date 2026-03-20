@@ -1,5 +1,120 @@
 # Changelog
 
+## 5.0.1 (2026-03-20)
+
+### 🐛 Fixes
+
+- **auto-ingest**: Daily log files (`YYYY-MM-DD.md`) are now skipped by default.
+  Only `MEMORY.md` (curated memory) is watched and ingested. Daily logs are raw
+  journals that often contain noise — they should be processed through the
+  memory-sync cron pipeline instead.
+- New environment variable `AGENT_MEMORY_AUTO_INGEST_DAILY=1` restores the
+  previous behavior of ingesting all `.md` files in the `memory/` directory.
+
+## 5.0.0 (2026-03-20)
+
+### 🧠 Memory Intelligence
+
+v5 is a major feature release that adds six intelligence capabilities to the
+memory layer. All features are backward-compatible with v4 workflows.
+
+Design document: `docs/design/0018-v5-memory-intelligence.md`
+
+#### F1: Memory Links (记忆关联)
+
+- Automatic link creation during `syncOne()`: after a successful `add` or
+  `merge`, candidates with `dedup_score ∈ [0.45, 0.82)` are saved as `related`
+  links (up to 5 per memory)
+- `recall` and `surface` accept a new `related: boolean` parameter. When true,
+  top-K results are expanded with linked memories from the `links` table
+  (capped at `limit * 1.5`, with score scaled by `original_score * link_weight * 0.6`)
+- Related memories are tagged with `match_type: 'related'` and
+  `related_source_id` in results so the agent knows why they appeared
+- New MCP tool **`link`**: manually create or remove associations
+  (`relation`: `related` | `supersedes` | `contradicts`, with optional `weight`)
+
+#### F2: Conflict Detection (冲突检测)
+
+- Write Guard (`guard.ts`) now iterates over multiple candidates instead of
+  only the top-1 match
+- Three conflict signal types detected between incoming content and existing
+  candidates:
+  - **Negation**: one side contains negation words the other does not
+  - **Value**: same entity with different numeric values (IPs, ports, versions)
+  - **Status**: one side marked done/cancelled while the other is in-progress
+- Conflict score (0–1) is computed from weighted signals. Conflicts above 0.5
+  are reported in `GuardResult.conflicts` and propagated to `SyncResult`
+- **Conflict Override rule**: when `dedup_score ≥ 0.93` and a `status` or
+  `value` conflict is detected, the guard action is forced from `skip` to
+  `update` — preventing legitimate state changes (e.g. TODO → DONE) from being
+  silently deduplicated. `negation` conflicts do not trigger override (higher
+  false-positive rate)
+- Writes are never blocked by conflict detection — the agent decides what to do
+
+#### F3: Temporal Recall (时间维度召回)
+
+- `recall` and `surface` accept new optional parameters:
+  - `after` / `before` (ISO 8601) — time-range filter at the SQL layer for
+    both BM25 and vector search paths
+  - `recency_boost` (0–1) — blends a recency decay signal into the fusion
+    score: `final = (1 - boost) * base + boost * e^(-days/30)`
+- BM25 and vector search functions (`searchBM25`, `searchByVector`) extended
+  with `after` / `before` filter support
+
+#### F4: Passive Feedback (被动反馈)
+
+- `FeedbackSource` type extended to `"recall" | "surface" | "passive"`
+- When `recall` records access, the top-3 results automatically receive a
+  positive passive feedback event (value 0.7, vs 1.0 for explicit feedback)
+- Rate-limited: max 3 passive feedback events per memory per 24-hour window
+- Anti-N+1: deduplication check uses a single batch `WHERE memory_id IN (...)`
+  query instead of per-memory `SELECT COUNT(*)`
+
+#### F5: Semantic Decay (语义衰减)
+
+- New `isStaleContent(content, type)` function in `tidy.ts` detects
+  temporally-stale content via keyword pattern matching
+- Pattern sets are scoped by memory type:
+  - `event`: broad matching (e.g. `正在`, `in progress`, `TODO`, `just now`)
+  - `knowledge`: anchored-start-only patterns (e.g. `^TODO:`, `^WIP:`) to
+    avoid false positives on knowledge descriptions containing those words
+  - `identity` and `emotion`: exempt from semantic decay
+- Age thresholds: `in_progress` > 7d, `pending` > 14d, `ephemeral` > 3d
+- Matched memories have their `vitality` multiplied by the pattern's
+  `decay_factor`
+- `TidyResult` now includes `staleDecayed` count
+
+#### F6: Memory Provenance (记忆溯源)
+
+- Schema migration v6 → v7: three new nullable columns on `memories`:
+  - `source_session` — originating session ID
+  - `source_context` — trigger context (≤200 chars)
+  - `observed_at` — when the event actually happened (distinct from write time)
+- `Memory` interface and `CreateMemoryInput` updated with provenance fields
+- MCP `remember` tool accepts `session_id`, `context`, `observed_at`
+- `recall` / `surface` results include provenance fields when present
+- `guard.ts` `timeProximity()` now prefers `observed_at` over regex-guessed
+  timestamps from content/URI/source
+
+### 🧰 Tooling
+
+- MCP toolset expanded from **10 → 11 tools** (added `link`)
+- MCP server version string updated to `5.0.0`
+
+### ✅ Tests
+
+- Added `tests/v5/intelligence.test.ts` with **25 new test cases** covering
+  all six v5 features
+- Total test count: **96** (up from 69 in v4.2)
+
+### 📦 Schema
+
+- Database schema version: **7** (from 6)
+- Migration is additive (nullable columns only) — safe to upgrade in place
+- Rollback: ignore new columns, delete new link/feedback rows by type
+
+---
+
 ## 4.2.0 (2026-03-19)
 
 ### 🛡️ Anti-Noise Hardening

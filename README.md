@@ -10,7 +10,7 @@
   <a href="https://www.npmjs.com/package/@smyslenny/agent-memory"><img src="https://img.shields.io/npm/v/@smyslenny/agent-memory" alt="npm" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-%E2%89%A518-green.svg" alt="Node.js" /></a>
-  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-10_tools-orange.svg" alt="MCP" /></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-11_tools-orange.svg" alt="MCP" /></a>
 </p>
 
 **English** | [简体中文说明](docs/README-zh.md)
@@ -22,7 +22,7 @@ AgentMemory is a SQLite-first memory layer for AI agents. It lets an agent:
 - **maintain** them over time with `reflect`, `reindex`, and feedback signals
 - **integrate** through **CLI**, **MCP stdio**, or **HTTP/SSE**
 
-Current release: **`4.3.0`**.
+Current release: **`5.0.1`**.
 
 Without an embedding provider, AgentMemory still works in **BM25-only mode**.
 With one configured, it adds **hybrid recall** and **semantic dedup**.
@@ -40,15 +40,35 @@ That means it is designed around the things agent runtimes actually need:
 - a lifecycle path for decay, governance, reindexing, and recovery-friendly jobs
 - a local-first deployment model that stays useful even without extra infra
 
-Core building blocks in v4:
+Core building blocks:
 
 - **Typed memories**: `identity`, `emotion`, `knowledge`, `event`
 - **URI paths** for stable addressing
-- **Write Guard** with semantic dedup + typed merge policy
+- **Write Guard** with semantic dedup + typed merge policy + conflict detection
 - **Hybrid retrieval**: BM25 first, optional vector search
+- **Memory links** with automatic association and related-memory expansion
+- **Temporal recall** with time filtering and recency boost
 - **Context-aware surfacing** for task/recent-turn driven context injection
+- **Passive feedback** that records usage signals automatically
+- **Semantic decay** that detects stale content beyond pure time-based Ebbinghaus
+- **Memory provenance** for tracking where and when each memory originated
 - **Lifecycle jobs**: `reflect`, `reindex`, job checkpoints, feedback signals
 - **Three transport modes**: CLI, MCP stdio, HTTP/SSE
+
+### New in v5: Memory Intelligence
+
+v5 adds six features that turn agent-memory from a durable store into an
+intelligent memory layer. All features are backward-compatible — existing
+v4 workflows continue to work unchanged.
+
+| Feature | What it does |
+| --- | --- |
+| **F1 Memory Links** | Automatically detects semantically related memories during write and builds lightweight associations. `recall` and `surface` support `related` expansion to pull in linked memories. A new `link` tool allows manual link management. |
+| **F2 Conflict Detection** | Write Guard now scans candidates for contradictions (negation, value changes, status changes). Conflicts are reported in the sync result without blocking writes. A **Conflict Override** rule ensures status updates (e.g. TODO → DONE) are not incorrectly deduplicated. |
+| **F3 Temporal Recall** | `recall` and `surface` accept `after`, `before`, and `recency_boost` parameters. Time filtering happens at the SQL layer for both BM25 and vector paths. Recency boost blends a time-decay signal into the fusion score. |
+| **F4 Passive Feedback** | When `recall` returns results and records access, positive feedback is automatically logged for the top-3 hits. Rate-limited to 3 passive events per memory per 24 hours. |
+| **F5 Semantic Decay** | The `tidy` phase now detects stale content through keyword pattern matching (e.g. "in progress", "TODO:", "just now"). Patterns are scoped by memory type — `event` uses broad matching, `knowledge` uses anchored-start-only patterns. `identity` and `emotion` are exempt. |
+| **F6 Memory Provenance** | Memories can carry `source_session`, `source_context`, and `observed_at` metadata. This tracks where and when a memory originated, separate from its write timestamp. Schema migrated from v6 → v7. |
 
 ## 2) How is it different from a vector DB, a RAG pipeline, or memory summaries?
 
@@ -177,18 +197,19 @@ npx agent-memory reflect all
 }
 ```
 
-Available MCP tools in v4:
+Available MCP tools:
 
-- `remember`
-- `recall`
-- `recall_path`
-- `boot`
-- `forget`
-- `reflect`
-- `status`
-- `ingest`
-- `reindex`
-- `surface`
+- `remember` — store a memory (supports provenance: `session_id`, `context`, `observed_at`)
+- `recall` — hybrid search (supports `related`, `after`, `before`, `recency_boost`)
+- `recall_path` — read or list memories by URI
+- `boot` — load startup memories (narrative or JSON)
+- `forget` — soft-decay or hard-delete a memory
+- `reflect` — run sleep cycle phases (decay, tidy, govern)
+- `status` — memory system statistics
+- `ingest` — extract structured memories from markdown
+- `reindex` — rebuild BM25 index and optional embeddings
+- `surface` — context-aware readonly surfacing (supports `related`, `after`, `before`, `recency_boost`)
+- `link` — manually create or remove associations between memories
 
 ### C. HTTP API
 
@@ -273,6 +294,22 @@ export AGENT_MEMORY_EMBEDDING_API_KEY=your-api-key
 
 Or use `AGENT_MEMORY_EMBEDDING_PROVIDER=local-http` for a local HTTP embedding
 service. If no provider is configured, AgentMemory falls back to BM25-only.
+
+## Environment variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AGENT_MEMORY_DB` | `./agent-memory.db` | SQLite database path |
+| `AGENT_MEMORY_AGENT_ID` | `default` | Agent scope for multi-agent setups |
+| `AGENT_MEMORY_MAX_MEMORIES` | `200` | Maximum memories retained during `reflect govern` |
+| `AGENT_MEMORY_AUTO_INGEST` | `1` | Set to `0` to disable the auto-ingest file watcher |
+| `AGENT_MEMORY_AUTO_INGEST_DAILY` | _(unset)_ | Set to `1` to include daily log files (`YYYY-MM-DD.md`) in auto-ingest. By default, only `MEMORY.md` is watched. |
+| `AGENT_MEMORY_WORKSPACE` | `~/.openclaw/workspace` | Workspace directory for the auto-ingest watcher |
+| `AGENT_MEMORY_EMBEDDING_PROVIDER` | _(unset)_ | `openai-compatible` or `local-http` |
+| `AGENT_MEMORY_EMBEDDING_BASE_URL` | _(unset)_ | Base URL for the embedding endpoint |
+| `AGENT_MEMORY_EMBEDDING_MODEL` | _(unset)_ | Embedding model name |
+| `AGENT_MEMORY_EMBEDDING_DIMENSION` | _(unset)_ | Embedding vector dimension |
+| `AGENT_MEMORY_EMBEDDING_API_KEY` | _(unset)_ | API key for the embedding provider |
 
 ## Documentation map
 
