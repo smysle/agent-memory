@@ -134,7 +134,6 @@ npx agent-memory status
 - [通用运行时集成](integrations/generic.md)
 - [OpenClaw 集成](integrations/openclaw.md)
 - [v3 → v4 迁移指南](migration-v3-v4.md)
-- [v5 设计文档 (DD-0018)](design/0018-v5-memory-intelligence.md)
 
 ## 许可证
 
