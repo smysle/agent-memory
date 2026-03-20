@@ -115,7 +115,7 @@ describe("Schema migration", () => {
     const db = openDatabase({ path: TEST_DB });
 
     const version = (db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined)?.value;
-    expect(version).toBe("7");
+    expect(version).toBe("8");
 
     // v6: emotion_tag column exists
     const memoryCols = db.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>;

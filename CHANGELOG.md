@@ -1,5 +1,43 @@
 # Changelog
 
+## 5.1.0 (2026-03-20)
+
+### ✨ Features
+
+#### Archive on Eviction (淘汰归档)
+
+- Memories evicted by governance are now **archived** to `memory_archive` instead
+  of permanently deleted. Only memories with `vitality ≥ 0.1` are archived;
+  lower-vitality memories (decayed noise) are still directly deleted.
+- New schema v8: adds `memory_archive` table (migration `v7 → v8` runs
+  automatically on startup).
+- New core functions: `archiveMemory()`, `restoreMemory()`, `listArchivedMemories()`,
+  `purgeArchive()`.
+- New MCP tool **`archive`**: `list` / `restore` / `purge` actions for managing
+  archived memories.
+- `GovernResult` now includes `archived` (count of memories actually written to
+  the archive table) and `evictedByType` breakdown.
+
+#### Tiered Capacity (分层容量)
+
+- Governance now enforces **per-type capacity limits** before the global cap.
+  Defaults: `identity: unlimited`, `emotion: 50`, `knowledge: 250`, `event: 50`,
+  `total: 350`.
+- Configurable via environment variables: `AGENT_MEMORY_MAX_IDENTITY`,
+  `AGENT_MEMORY_MAX_EMOTION`, `AGENT_MEMORY_MAX_KNOWLEDGE`,
+  `AGENT_MEMORY_MAX_EVENT`, `AGENT_MEMORY_MAX_MEMORIES`.
+- `status` MCP tool now returns a `capacity` object showing per-type counts and
+  limits.
+- Identity memories (P0) are **never evicted** unless an explicit
+  `AGENT_MEMORY_MAX_IDENTITY` is set.
+
+### ♻️ Notes
+
+- Tidy phase (`runTidy`) still deletes low-vitality memories directly — no
+  archiving. Only govern-phase evictions (capacity-based) go to the archive.
+- All new parameters have defaults; upgrading from 5.0.x requires no config
+  changes. Schema migration is automatic.
+
 ## 5.0.1 (2026-03-20)
 
 ### 🐛 Fixes

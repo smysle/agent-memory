@@ -2,7 +2,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 const SCHEMA_SQL = `
 -- Memory entries
@@ -109,6 +109,30 @@ CREATE TABLE IF NOT EXISTS schema_meta (
   value TEXT NOT NULL
 );
 
+-- Memory archive (eviction archive)
+CREATE TABLE IF NOT EXISTS memory_archive (
+  id             TEXT PRIMARY KEY,
+  content        TEXT NOT NULL,
+  type           TEXT NOT NULL,
+  priority       INTEGER NOT NULL,
+  emotion_val    REAL NOT NULL DEFAULT 0.0,
+  vitality       REAL NOT NULL DEFAULT 0.0,
+  stability      REAL NOT NULL DEFAULT 1.0,
+  access_count   INTEGER NOT NULL DEFAULT 0,
+  last_accessed  TEXT,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL,
+  archived_at    TEXT NOT NULL,
+  archive_reason TEXT NOT NULL DEFAULT 'eviction',
+  source         TEXT,
+  agent_id       TEXT NOT NULL DEFAULT 'default',
+  hash           TEXT,
+  emotion_tag    TEXT,
+  source_session TEXT,
+  source_context TEXT,
+  observed_at    TEXT
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
 CREATE INDEX IF NOT EXISTS idx_memories_priority ON memories(priority);
@@ -119,6 +143,9 @@ CREATE INDEX IF NOT EXISTS idx_paths_memory ON paths(memory_id);
 CREATE INDEX IF NOT EXISTS idx_paths_domain ON paths(domain);
 CREATE INDEX IF NOT EXISTS idx_maintenance_jobs_phase_status ON maintenance_jobs(phase, status, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_feedback_events_memory ON feedback_events(memory_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_archive_agent ON memory_archive(agent_id);
+CREATE INDEX IF NOT EXISTS idx_memory_archive_type ON memory_archive(type);
+CREATE INDEX IF NOT EXISTS idx_memory_archive_archived_at ON memory_archive(archived_at);
 `;
 
 export interface DbOptions {
@@ -235,6 +262,11 @@ function migrateDatabase(db: Database.Database, from: number, to: number): void 
       v = 7;
       continue;
     }
+    if (v === 7) {
+      migrateV7ToV8(db);
+      v = 8;
+      continue;
+    }
     throw new Error(`Unsupported schema migration path: v${from} → v${to} (stuck at v${v})`);
   }
 }
@@ -348,6 +380,9 @@ function inferSchemaVersion(db: Database.Database): number {
     && tableHasColumn(db, "memories", "source_context")
     && tableHasColumn(db, "memories", "observed_at");
 
+  const hasMemoryArchive = tableExists(db, "memory_archive");
+
+  if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings && hasMaintenanceJobs && hasFeedbackEvents && hasEmotionTag && hasProvenance && hasMemoryArchive) return 8;
   if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings && hasMaintenanceJobs && hasFeedbackEvents && hasEmotionTag && hasProvenance) return 7;
   if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings && hasMaintenanceJobs && hasFeedbackEvents && hasEmotionTag) return 6;
   if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings && hasMaintenanceJobs && hasFeedbackEvents) return 5;
@@ -391,6 +426,11 @@ function ensureIndexes(db: Database.Database): void {
     if (tableHasColumn(db, "feedback_events", "agent_id") && tableHasColumn(db, "feedback_events", "source")) {
       db.exec("CREATE INDEX IF NOT EXISTS idx_feedback_events_agent_source ON feedback_events(agent_id, source, created_at DESC);");
     }
+  }
+  if (tableExists(db, "memory_archive")) {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memory_archive_agent ON memory_archive(agent_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memory_archive_type ON memory_archive(type);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memory_archive_archived_at ON memory_archive(archived_at);");
   }
 }
 
@@ -578,6 +618,50 @@ function migrateV6ToV7(db: Database.Database): void {
     db.exec("CREATE INDEX IF NOT EXISTS idx_memories_observed_at ON memories(observed_at) WHERE observed_at IS NOT NULL;");
     db.exec("CREATE INDEX IF NOT EXISTS idx_memories_updated_at ON memories(updated_at);");
     db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)").run(String(7));
+    db.exec("COMMIT");
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw e;
+  }
+}
+
+function migrateV7ToV8(db: Database.Database): void {
+  // v8 adds memory_archive table for eviction archiving
+  if (tableExists(db, "memory_archive")) {
+    db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)").run(String(8));
+    return;
+  }
+
+  try {
+    db.exec("BEGIN");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_archive (
+        id             TEXT PRIMARY KEY,
+        content        TEXT NOT NULL,
+        type           TEXT NOT NULL,
+        priority       INTEGER NOT NULL,
+        emotion_val    REAL NOT NULL DEFAULT 0.0,
+        vitality       REAL NOT NULL DEFAULT 0.0,
+        stability      REAL NOT NULL DEFAULT 1.0,
+        access_count   INTEGER NOT NULL DEFAULT 0,
+        last_accessed  TEXT,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL,
+        archived_at    TEXT NOT NULL,
+        archive_reason TEXT NOT NULL DEFAULT 'eviction',
+        source         TEXT,
+        agent_id       TEXT NOT NULL DEFAULT 'default',
+        hash           TEXT,
+        emotion_tag    TEXT,
+        source_session TEXT,
+        source_context TEXT,
+        observed_at    TEXT
+      );
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memory_archive_agent ON memory_archive(agent_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memory_archive_type ON memory_archive(type);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memory_archive_archived_at ON memory_archive(archived_at);");
+    db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)").run(String(8));
     db.exec("COMMIT");
   } catch (e) {
     try { db.exec("ROLLBACK"); } catch {}

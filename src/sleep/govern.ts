@@ -1,12 +1,14 @@
 // AgentMemory — Governance cycle (memory health maintenance)
 import type Database from "better-sqlite3";
-import { deleteMemory, type Memory } from "../core/memory.js";
+import { deleteMemory, archiveMemory, type Memory } from "../core/memory.js";
 import { tokenize } from "../search/tokenizer.js";
 
 export interface GovernResult {
   orphanPaths: number;
   emptyMemories: number;
   evicted: number;
+  archived: number;
+  evictedByType: Record<string, number>;
 }
 
 export interface EvictionCandidate {
@@ -120,26 +122,59 @@ export function rankEvictionCandidates(
     });
 }
 
+function parseEnvInt(envKey: string): number | null {
+  const raw = process.env[envKey];
+  if (raw === undefined || raw === "") return null;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export interface TieredCapacity {
+  identity: number | null;  // null = unlimited (default)
+  emotion: number | null;
+  knowledge: number | null;
+  event: number | null;
+  total: number;
+}
+
+export function getTieredCapacity(opts?: { maxMemories?: number }): TieredCapacity {
+  const envMax = parseEnvInt("AGENT_MEMORY_MAX_MEMORIES");
+  return {
+    identity: parseEnvInt("AGENT_MEMORY_MAX_IDENTITY"),    // default: null (unlimited)
+    emotion: parseEnvInt("AGENT_MEMORY_MAX_EMOTION") ?? 50,
+    knowledge: parseEnvInt("AGENT_MEMORY_MAX_KNOWLEDGE") ?? 250,
+    event: parseEnvInt("AGENT_MEMORY_MAX_EVENT") ?? 50,
+    total: opts?.maxMemories ?? (envMax ?? 350),
+  };
+}
+
 /**
  * Run governance checks and cleanup:
  * 1. Remove orphan paths (no parent memory)
  * 2. Remove empty memories (blank content)
- * 3. Evict low-value memories when over capacity using eviction_score
+ * 3. Evict low-value memories when over capacity using tiered + global eviction
  *
- * maxMemories can be set via AGENT_MEMORY_MAX_MEMORIES env var (default: 200).
+ * Tiered capacity can be set via env vars:
+ *   AGENT_MEMORY_MAX_IDENTITY, AGENT_MEMORY_MAX_EMOTION,
+ *   AGENT_MEMORY_MAX_KNOWLEDGE, AGENT_MEMORY_MAX_EVENT,
+ *   AGENT_MEMORY_MAX_MEMORIES (global cap, default 350)
+ *
+ * Evicted memories are archived to memory_archive before deletion.
  */
 export function runGovern(
   db: Database.Database,
   opts?: { agent_id?: string; maxMemories?: number },
 ): GovernResult {
   const agentId = opts?.agent_id;
-  const envMax = Number.parseInt(process.env.AGENT_MEMORY_MAX_MEMORIES ?? "", 10);
-  const maxMemories = opts?.maxMemories ?? (Number.isFinite(envMax) && envMax > 0 ? envMax : 200);
+  const capacity = getTieredCapacity(opts);
   let orphanPaths = 0;
   let emptyMemories = 0;
   let evicted = 0;
+  let archived = 0;
+  const evictedByType: Record<string, number> = {};
 
   const transaction = db.transaction(() => {
+    // Step 1: Clean orphan paths
     const pathResult = agentId
       ? db.prepare(
         `DELETE FROM paths
@@ -149,26 +184,75 @@ export function runGovern(
       : db.prepare("DELETE FROM paths WHERE memory_id NOT IN (SELECT id FROM memories)").run();
     orphanPaths = pathResult.changes;
 
+    // Step 2: Clean empty memories
     const emptyResult = agentId
       ? db.prepare("DELETE FROM memories WHERE agent_id = ? AND TRIM(content) = ''").run(agentId)
       : db.prepare("DELETE FROM memories WHERE TRIM(content) = ''").run();
     emptyMemories = emptyResult.changes;
 
+    // Step 3: Tiered eviction — per-type limits
+    const typeLimits: Array<{ type: string; limit: number | null }> = [
+      { type: "identity", limit: capacity.identity },
+      { type: "emotion", limit: capacity.emotion },
+      { type: "knowledge", limit: capacity.knowledge },
+      { type: "event", limit: capacity.event },
+    ];
+
+    // Build all eviction candidates once (sorted by eviction_score desc)
+    const allCandidates = rankEvictionCandidates(db, { agent_id: agentId });
+    const evictedIds = new Set<string>();
+
+    for (const { type, limit } of typeLimits) {
+      if (limit === null) continue; // null = unlimited, skip
+
+      const typeCount = (
+        db.prepare(
+          agentId
+            ? "SELECT COUNT(*) as c FROM memories WHERE agent_id = ? AND type = ?"
+            : "SELECT COUNT(*) as c FROM memories WHERE type = ?",
+        ).get(...(agentId ? [agentId, type] : [type])) as { c: number }
+      ).c;
+
+      const excess = Math.max(0, typeCount - limit);
+      if (excess <= 0) continue;
+
+      // Get candidates of this type, sorted by eviction_score desc
+      const typeCandidates = allCandidates
+        .filter((c) => c.memory.type === type && !evictedIds.has(c.memory.id));
+
+      const toEvict = typeCandidates.slice(0, excess);
+      for (const candidate of toEvict) {
+        const result = archiveMemory(db, candidate.memory.id, "eviction");
+        evictedIds.add(candidate.memory.id);
+        evicted += 1;
+        if (result === "archived") archived += 1;
+        evictedByType[type] = (evictedByType[type] ?? 0) + 1;
+      }
+    }
+
+    // Step 4: Global cap eviction
     const total = (
       db.prepare(agentId ? "SELECT COUNT(*) as c FROM memories WHERE agent_id = ?" : "SELECT COUNT(*) as c FROM memories").get(...(agentId ? [agentId] : [])) as { c: number }
     ).c;
 
-    const excess = Math.max(0, total - maxMemories);
-    if (excess <= 0) return;
+    const globalExcess = Math.max(0, total - capacity.total);
+    if (globalExcess > 0) {
+      const globalCandidates = allCandidates
+        .filter((c) => !evictedIds.has(c.memory.id));
 
-    const candidates = rankEvictionCandidates(db, { agent_id: agentId }).slice(0, excess);
-    for (const candidate of candidates) {
-      deleteMemory(db, candidate.memory.id);
-      evicted += 1;
+      const toEvict = globalCandidates.slice(0, globalExcess);
+      for (const candidate of toEvict) {
+        const result = archiveMemory(db, candidate.memory.id, "eviction");
+        evictedIds.add(candidate.memory.id);
+        evicted += 1;
+        if (result === "archived") archived += 1;
+        const t = candidate.memory.type;
+        evictedByType[t] = (evictedByType[t] ?? 0) + 1;
+      }
     }
   });
 
   transaction();
 
-  return { orphanPaths, emptyMemories, evicted };
+  return { orphanPaths, emptyMemories, evicted, archived, evictedByType };
 }

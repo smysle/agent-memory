@@ -15,7 +15,7 @@ export {
   type ReflectInput as AppReflectInput,
   type ReflectProgressEvent as AppReflectProgressEvent,
 } from "./app/reflect.js";
-export { getMemoryStatus, type StatusResult } from "./app/status.js";
+export { getMemoryStatus, type StatusResult, type CapacityInfo } from "./app/status.js";
 export {
   recordFeedbackEvent,
   getFeedbackScore,
@@ -38,7 +38,9 @@ export { openDatabase, isCountRow, type DbOptions } from "./core/db.js";
 export {
   createMemory, getMemory, updateMemory, deleteMemory, listMemories,
   recordAccess, countMemories, contentHash,
+  archiveMemory, restoreMemory, listArchivedMemories, purgeArchive,
   type Memory, type MemoryType, type Priority, type CreateMemoryInput, type UpdateMemoryInput,
+  type ArchivedMemory,
 } from "./core/memory.js";
 export {
   createPath, getPath, getPathByUri, getPathsByMemory, getPathsByDomain, getPathsByPrefix,
@@ -115,7 +117,7 @@ export { runAutoIngestWatcher, type AutoIngestWatcherOptions, type AutoIngestWat
 export { calculateVitality, runDecay, getDecayedMemories } from "./sleep/decay.js";
 export { syncOne, syncBatch, type SyncInput, type SyncResult } from "./sleep/sync.js";
 export { runTidy, isStaleContent, type TidyResult } from "./sleep/tidy.js";
-export { runGovern, rankEvictionCandidates, computeEvictionScore, type GovernResult, type EvictionCandidate } from "./sleep/govern.js";
+export { runGovern, rankEvictionCandidates, computeEvictionScore, getTieredCapacity, type GovernResult, type EvictionCandidate, type TieredCapacity } from "./sleep/govern.js";
 export {
   boot,
   formatRelativeDate,

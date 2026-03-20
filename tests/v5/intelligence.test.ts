@@ -79,9 +79,9 @@ describe("v5 Memory Intelligence", () => {
       expect(mem!.observed_at).toBeNull();
     });
 
-    it("schema version is 7", () => {
+    it("schema version is 8", () => {
       const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string };
-      expect(row.value).toBe("7");
+      expect(row.value).toBe("8");
     });
   });
 

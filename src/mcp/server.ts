@@ -9,6 +9,10 @@ import {
   listMemories,
   countMemories,
   recordAccess,
+  archiveMemory,
+  restoreMemory,
+  listArchivedMemories,
+  purgeArchive,
   type Memory,
 } from "../core/memory.js";
 import { getPathByUri, getPathsByPrefix } from "../core/path.js";
@@ -194,7 +198,7 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
 
   const server = new McpServer({
     name: "agent-memory",
-    version: "5.0.0",
+    version: "5.1.0",
   });
 
   server.tool(
@@ -521,6 +525,79 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
           weight: weight ?? 1.0,
         }) }],
       };
+    },
+  );
+
+  server.tool(
+    "archive",
+    "Manage archived memories (evicted by governance). List, restore, or purge archived memories.",
+    {
+      action: z.enum(["list", "restore", "purge"]).describe("list: view archived memories; restore: recover one by id; purge: permanently delete all archived"),
+      id: z.string().optional().describe("Memory ID to restore (required for restore action)"),
+      agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
+      limit: z.number().min(1).max(100).default(20).optional().describe("Max results for list (default 20)"),
+    },
+    async ({ action, id, agent_id, limit }) => {
+      const effectiveAgentId = agent_id ?? aid;
+
+      if (action === "list") {
+        const archived = listArchivedMemories(db, { agent_id: effectiveAgentId, limit: limit ?? 20 });
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              action: "list",
+              count: archived.length,
+              memories: archived.map((m) => ({
+                id: m.id,
+                content: m.content.slice(0, 200),
+                type: m.type,
+                priority: m.priority,
+                vitality: m.vitality,
+                archived_at: m.archived_at,
+                archive_reason: m.archive_reason,
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      if (action === "restore") {
+        if (!id) {
+          return { content: [{ type: "text" as const, text: '{"error": "id is required for restore action"}' }] };
+        }
+        const restored = restoreMemory(db, id);
+        if (!restored) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Archived memory not found", id }) }] };
+        }
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              action: "restored",
+              memory: {
+                id: restored.id,
+                content: restored.content,
+                type: restored.type,
+                priority: restored.priority,
+                vitality: restored.vitality,
+              },
+            }, null, 2),
+          }],
+        };
+      }
+
+      if (action === "purge") {
+        const purged = purgeArchive(db, { agent_id: effectiveAgentId });
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({ action: "purged", deleted: purged }, null, 2),
+          }],
+        };
+      }
+
+      return { content: [{ type: "text" as const, text: '{"error": "Unknown action"}' }] };
     },
   );
 

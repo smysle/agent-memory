@@ -223,8 +223,146 @@ export function updateMemory(
 export function deleteMemory(db: Database.Database, id: string): boolean {
   // FTS cleanup
   db.prepare("DELETE FROM memories_fts WHERE id = ?").run(id);
+  // Embedding cleanup (best-effort for older schemas)
+  try { db.prepare("DELETE FROM embeddings WHERE memory_id = ?").run(id); } catch {}
   const result = db.prepare("DELETE FROM memories WHERE id = ?").run(id);
   return result.changes > 0;
+}
+
+export interface ArchivedMemory {
+  id: string;
+  content: string;
+  type: string;
+  priority: number;
+  emotion_val: number;
+  vitality: number;
+  stability: number;
+  access_count: number;
+  last_accessed: string | null;
+  created_at: string;
+  updated_at: string;
+  archived_at: string;
+  archive_reason: string;
+  source: string | null;
+  agent_id: string;
+  hash: string | null;
+  emotion_tag: string | null;
+  source_session: string | null;
+  source_context: string | null;
+  observed_at: string | null;
+}
+
+/**
+ * Archive a memory to memory_archive, then delete from memories.
+ * If minVitality is set (default 0.1), memories below that threshold
+ * are directly deleted without archiving — they're decayed noise.
+ * Returns "archived" if actually archived, "deleted" if skipped to direct delete,
+ * or false if memory not found.
+ */
+export function archiveMemory(
+  db: Database.Database,
+  id: string,
+  reason?: string,
+  opts?: { minVitality?: number },
+): "archived" | "deleted" | false {
+  const mem = getMemory(db, id);
+  if (!mem) return false;
+
+  const minVitality = opts?.minVitality ?? 0.1;
+
+  // Below minVitality → direct delete, not worth archiving
+  if (mem.vitality < minVitality) {
+    deleteMemory(db, id);
+    return "deleted";
+  }
+
+  const archivedAt = now();
+  const archiveReason = reason ?? "eviction";
+
+  db.prepare(
+    `INSERT OR REPLACE INTO memory_archive
+     (id, content, type, priority, emotion_val, vitality, stability, access_count,
+      last_accessed, created_at, updated_at, archived_at, archive_reason,
+      source, agent_id, hash, emotion_tag, source_session, source_context, observed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    mem.id, mem.content, mem.type, mem.priority, mem.emotion_val,
+    mem.vitality, mem.stability, mem.access_count, mem.last_accessed,
+    mem.created_at, mem.updated_at, archivedAt, archiveReason,
+    mem.source, mem.agent_id, mem.hash, mem.emotion_tag,
+    mem.source_session, mem.source_context, mem.observed_at,
+  );
+
+  deleteMemory(db, id);
+  return "archived";
+}
+
+export function restoreMemory(db: Database.Database, id: string): Memory | null {
+  const archived = db.prepare("SELECT * FROM memory_archive WHERE id = ?").get(id) as ArchivedMemory | undefined;
+  if (!archived) return null;
+
+  // Re-insert into memories table
+  db.prepare(
+    `INSERT INTO memories
+     (id, content, type, priority, emotion_val, vitality, stability, access_count,
+      last_accessed, created_at, updated_at, source, agent_id, hash, emotion_tag,
+      source_session, source_context, observed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    archived.id, archived.content, archived.type, archived.priority,
+    archived.emotion_val, archived.vitality, archived.stability,
+    archived.access_count, archived.last_accessed, archived.created_at,
+    now(), // updated_at = restore time
+    archived.source, archived.agent_id, archived.hash, archived.emotion_tag,
+    archived.source_session, archived.source_context, archived.observed_at,
+  );
+
+  // Rebuild FTS index
+  db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(
+    archived.id,
+    tokenizeForIndex(archived.content),
+  );
+
+  // Mark embedding as pending
+  if (archived.hash) {
+    const providerId = getConfiguredEmbeddingProviderId();
+    if (providerId) {
+      try {
+        markMemoryEmbeddingPending(db, archived.id, providerId, archived.hash);
+      } catch {
+        // Older schemas may not have the embeddings table.
+      }
+    }
+  }
+
+  // Remove from archive
+  db.prepare("DELETE FROM memory_archive WHERE id = ?").run(id);
+
+  return getMemory(db, archived.id)!;
+}
+
+export function listArchivedMemories(
+  db: Database.Database,
+  opts?: { agent_id?: string; limit?: number },
+): ArchivedMemory[] {
+  const agentId = opts?.agent_id;
+  const limit = opts?.limit ?? 20;
+
+  if (agentId) {
+    return db.prepare(
+      "SELECT * FROM memory_archive WHERE agent_id = ? ORDER BY archived_at DESC LIMIT ?",
+    ).all(agentId, limit) as ArchivedMemory[];
+  }
+  return db.prepare(
+    "SELECT * FROM memory_archive ORDER BY archived_at DESC LIMIT ?",
+  ).all(limit) as ArchivedMemory[];
+}
+
+export function purgeArchive(db: Database.Database, opts?: { agent_id?: string }): number {
+  if (opts?.agent_id) {
+    return db.prepare("DELETE FROM memory_archive WHERE agent_id = ?").run(opts.agent_id).changes;
+  }
+  return db.prepare("DELETE FROM memory_archive").run().changes;
 }
 
 export function listMemories(
