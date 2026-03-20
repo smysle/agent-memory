@@ -1,13 +1,11 @@
 # OpenClaw Examples
 
-These files collect the host-specific workflow that used to live at the top
-level of `examples/`.
+These files collect the host-specific workflow for running AgentMemory
+on OpenClaw.
 
 Contents:
 
-- `openclaw-setup.md` — setup notes and cron suggestions
-- `memory-sync-prompt.txt` — sample sync prompt
-- `memory-tidy-prompt.txt` — sample tidy prompt
+- `openclaw-setup.md` — setup notes and cron suggestions (v5)
 - `memory-janitor-phase5.md` — janitor tail phase for decay + consistency
 - `daily-journal.md.example` — example daily journal file
 - `MEMORY.md.example` — example long-term memory file

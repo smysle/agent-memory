@@ -157,8 +157,8 @@ MCP is a good fit when your host already has a tool abstraction.
 
 ### MCP tool list
 
-- `remember`
-- `recall`
+- `remember` — store a memory (supports provenance: `source_session`, `source_context`, `observed_at`)
+- `recall` — hybrid search (supports `related`, `after`, `before`, `recency_boost`)
 - `recall_path`
 - `boot`
 - `forget`
@@ -166,7 +166,8 @@ MCP is a good fit when your host already has a tool abstraction.
 - `status`
 - `ingest`
 - `reindex`
-- `surface`
+- `surface` — context-aware surfacing (supports `related`, `after`, `before`, `recency_boost`)
+- `link` — manually create or remove associations between memories
 
 See [examples/mcp-stdio](../../examples/mcp-stdio) for a minimal example.
 
@@ -275,6 +276,45 @@ Options:
 
 For generic runtimes, prefer **explicit ingest** first. Set
 `AGENT_MEMORY_AUTO_INGEST=0` unless you intentionally want watcher behavior.
+
+## v5 Features
+
+AgentMemory v5 adds intelligence capabilities that enhance the integration
+pattern described above. All features are backward-compatible.
+
+### Memory Links (F1)
+
+Memories are automatically linked to semantically related memories during
+writes. Use `related=true` in `recall` or `surface` to expand results with
+linked memories. The `link` tool allows manual link management.
+
+### Conflict Detection (F2)
+
+Write Guard now detects contradictions (negation, value changes, status
+changes) during writes. Conflicts are reported in the sync result. A
+**Conflict Override** rule ensures status updates (e.g. TODO → DONE) are not
+incorrectly deduplicated.
+
+### Temporal Recall (F3)
+
+`recall` and `surface` accept `after`, `before`, and `recency_boost` parameters
+for time-aware search. Time filtering happens at the SQL layer.
+
+### Passive Feedback (F4)
+
+When `recall` returns results, positive feedback is automatically logged for
+the top-3 hits. Rate-limited to 3 passive events per memory per 24 hours.
+
+### Semantic Decay (F5)
+
+The `tidy` phase detects stale content through keyword pattern matching
+(e.g. "in progress", "TODO:", "just now"). `identity` and `emotion` types
+are exempt.
+
+### Memory Provenance (F6)
+
+Memories can carry `source_session`, `source_context`, and `observed_at`
+metadata to track where and when they originated.
 
 ## Common mistakes
 

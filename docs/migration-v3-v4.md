@@ -234,3 +234,18 @@ The biggest v4 migration is conceptual, not operational:
 
 That makes the project easier to evaluate, easier to adopt, and easier to plug
 into systems that do not look like OpenClaw at all.
+
+## What's next: v5
+
+AgentMemory **v5 (Memory Intelligence)** is now available. It adds six
+backward-compatible features on top of v4:
+
+- **Memory Links** — automatic semantic associations between memories
+- **Conflict Detection** — Write Guard detects contradictions during writes
+- **Temporal Recall** — `after`, `before`, and `recency_boost` for time-aware search
+- **Passive Feedback** — automatic positive feedback for accessed memories
+- **Semantic Decay** — stale content detection beyond pure time-based Ebbinghaus
+- **Memory Provenance** — `source_session`, `source_context`, `observed_at` metadata
+
+All v4 workflows continue to work unchanged. See the
+[README](../README.md) for the full v5 feature overview.

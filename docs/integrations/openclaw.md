@@ -37,10 +37,10 @@ That means the Markdown workflow is still valid here, but it is now an
       "command": "node",
       "args": ["./node_modules/@smyslenny/agent-memory/dist/mcp/server.js"],
       "env": {
-        "AGENT_MEMORY_DB": "./agent-memory.db",
-        "AGENT_MEMORY_AGENT_ID": "noah",
+        "AGENT_MEMORY_DB": "~/.openclaw/workspace/agent-memory.db",
+        "AGENT_MEMORY_AGENT_ID": "my-agent",
         "AGENT_MEMORY_AUTO_INGEST": "1",
-        "AGENT_MEMORY_WORKSPACE": "/home/user/.openclaw/workspace"
+        "AGENT_MEMORY_WORKSPACE": "~/.openclaw/workspace"
       }
     }
   }
@@ -72,6 +72,46 @@ This keeps responsibilities separated:
 - Markdown is good for human editing and auditability
 - AgentMemory is good for retrieval, dedup, surfacing, and lifecycle
 - OpenClaw is good at orchestration and scheduled host behavior
+
+## v5 Features for OpenClaw Users
+
+AgentMemory v5 adds six intelligence features that are particularly useful
+in the OpenClaw cron pipeline:
+
+### Memory Provenance (F6)
+
+When calling `remember` from your sync prompt, include provenance metadata:
+
+```
+remember(content="...", type="knowledge",
+  source_session="session-id",
+  source_context="extracted from 14:00 sync",
+  observed_at="2026-03-20T14:00:00+08:00")
+```
+
+### Temporal Recall (F3)
+
+Use `after`, `before`, and `recency_boost` to filter memories by time:
+
+```
+recall(query="deployment decisions", after="2026-03-01", recency_boost=true)
+surface(task="plan next sprint", after="2026-03-15", related=true)
+```
+
+### Memory Links (F1)
+
+The `link` tool allows manual association between memories. Use `related=true`
+in `recall` or `surface` to expand results with linked memories.
+
+### Conflict Detection (F2)
+
+Write Guard detects contradictions during writes (e.g., status changes from
+TODO to DONE). Conflicts are reported without blocking writes.
+
+### Passive Feedback (F4) & Semantic Decay (F5)
+
+`recall` automatically logs positive feedback for top hits. The `tidy` phase
+detects stale content patterns and accelerates decay for outdated memories.
 
 ## Example directory layout
 
@@ -132,10 +172,9 @@ What changed in v4 is not support, but **positioning**:
 
 See [examples/openclaw](../../examples/openclaw) for:
 
-- setup notes
-- sample cron prompts
-- journal examples
+- setup notes and cron configuration
 - memory janitor Phase 5 template
+- journal and long-term memory examples
 
 ## Migration notes for v3 users
 
@@ -145,4 +184,5 @@ If you came from the old v3 README:
 - it has simply moved out of the project homepage
 - generic integration guidance now lives alongside it, not under it
 
-For release-level changes, see [v3 → v4 migration guide](../migration-v3-v4.md).
+For release-level changes, see [v3 → v4 migration guide](../migration-v3-v4.md)
+and the [README](../../README.md) for v5 features.

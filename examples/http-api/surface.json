@@ -6,5 +6,8 @@
     "Keep it short and put action items first."
   ],
   "intent": "planning",
-  "limit": 5
+  "limit": 5,
+  "related": true,
+  "after": "2026-03-01T00:00:00Z",
+  "recency_boost": true
 }

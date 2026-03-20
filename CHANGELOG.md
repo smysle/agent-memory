@@ -18,7 +18,7 @@
 v5 is a major feature release that adds six intelligence capabilities to the
 memory layer. All features are backward-compatible with v4 workflows.
 
-Design document: `docs/design/0018-v5-memory-intelligence.md`
+Design document: see the v5 feature table in [README.md](README.md).
 
 #### F1: Memory Links (记忆关联)
 

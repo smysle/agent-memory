@@ -2,5 +2,8 @@
   "agent_id": "http-demo",
   "type": "knowledge",
   "uri": "knowledge://users/alice/preferences/summaries",
-  "content": "Alice prefers short weekly summaries with action items first."
+  "content": "Alice prefers short weekly summaries with action items first.",
+  "source_session": "session-2026-03-20-14-00",
+  "source_context": "Extracted from planning discussion",
+  "observed_at": "2026-03-20T14:30:00Z"
 }
