@@ -144,6 +144,8 @@ function formatRecallResponse(result: Awaited<ReturnType<typeof recallMemory>>) 
       vector_rank: row.vector_rank,
       bm25_score: row.bm25_score,
       vector_score: row.vector_score,
+      related_source_id: row.related_source_id,
+      match_type: row.match_type,
       updated_at: row.memory.updated_at,
     })),
   };
@@ -169,6 +171,8 @@ function formatSurfaceResponse(result: Awaited<ReturnType<typeof surfaceMemories
       feedback_score: row.feedback_score,
       feedback_summary: row.feedback_summary,
       reason_codes: row.reason_codes,
+      related_source_id: row.related_source_id,
+      match_type: row.match_type,
       updated_at: row.memory.updated_at,
     })),
   };
@@ -369,6 +373,10 @@ export function createHttpServer(options?: HttpServerOptions): AgentMemoryHttpSe
           agent_id: asString(body.agent_id) ?? defaultAgentId,
           conservative: asBoolean(body.conservative),
           provider: options?.provider,
+          emotion_tag: asString(body.emotion_tag),
+          source_session: asString(body.source_session),
+          source_context: asString(body.source_context),
+          observed_at: asString(body.observed_at),
         });
 
         sendJson(res, 200, result);
@@ -387,6 +395,11 @@ export function createHttpServer(options?: HttpServerOptions): AgentMemoryHttpSe
           limit: asNumber(body.limit),
           agent_id: asString(body.agent_id) ?? defaultAgentId,
           provider: options?.provider,
+          related: asBoolean(body.related),
+          after: asString(body.after),
+          before: asString(body.before),
+          recency_boost: asNumber(body.recency_boost),
+          emotion_tag: asString(body.emotion_tag),
         });
 
         sendJson(res, 200, formatRecallResponse(result));
@@ -410,6 +423,11 @@ export function createHttpServer(options?: HttpServerOptions): AgentMemoryHttpSe
           limit: asNumber(body.limit),
           agent_id: asString(body.agent_id) ?? defaultAgentId,
           provider: options?.provider,
+          related: asBoolean(body.related),
+          after: asString(body.after),
+          before: asString(body.before),
+          recency_boost: asNumber(body.recency_boost),
+          emotion_tag: asString(body.emotion_tag),
         });
 
         sendJson(res, 200, formatSurfaceResponse(result));

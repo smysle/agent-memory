@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { listMemories, type Memory, type MemoryType } from "../core/memory.js";
 import type { EmbeddingProvider } from "../search/embedding.js";
-import { priorityPrior } from "../search/hybrid.js";
+import { priorityPrior, fetchRelatedLinks } from "../search/hybrid.js";
 import { getEmbeddingProviderFromEnv } from "../search/providers.js";
 import { searchBM25 } from "../search/bm25.js";
 import { tokenize } from "../search/tokenizer.js";
@@ -41,6 +41,8 @@ export interface SurfaceResult {
   lexical_rank?: number;
   semantic_rank?: number;
   semantic_similarity?: number;
+  related_source_id?: string;
+  match_type?: "direct" | "related";
 }
 
 export interface SurfaceResponse {
@@ -372,6 +374,7 @@ export async function surfaceMemories(
         lexical_rank: signal.queryRank ?? signal.recentRank ?? signal.taskRank,
         semantic_rank: signal.semanticRank,
         semantic_similarity: signal.semanticSimilarity,
+        match_type: "direct" as const,
       } satisfies SurfaceResult;
     })
     .sort((left, right) => {
@@ -382,6 +385,49 @@ export async function surfaceMemories(
       return right.memory.updated_at.localeCompare(left.memory.updated_at);
     })
     .slice(0, limit);
+
+  // Expand related if requested
+  if (input.related) {
+    const existingIds = new Set(results.map((r) => r.memory.id));
+    const links = fetchRelatedLinks(
+      db,
+      results.map((r) => r.memory.id),
+      agentId,
+      existingIds,
+    );
+
+    const relatedResults: SurfaceResult[] = links.map((link) => {
+      const sourceResult = results.find((r) => r.memory.id === link.sourceId);
+      const feedbackSummary = getFeedbackSummary(db, link.memory.id, agentId);
+      return {
+        memory: link.memory,
+        score: (sourceResult?.score ?? 0) * link.weight * 0.6,
+        semantic_score: 0,
+        lexical_score: 0,
+        task_match: 0,
+        vitality: link.memory.vitality,
+        priority_prior: priorityPrior(link.memory.priority),
+        feedback_score: feedbackSummary.score,
+        feedback_summary: feedbackSummary,
+        reason_codes: [`type:${link.memory.type}`, "related"],
+        related_source_id: link.sourceId,
+        match_type: "related" as const,
+      };
+    });
+
+    const maxTotal = Math.floor(limit * 1.5);
+    const combined = [...results, ...relatedResults]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, maxTotal);
+
+    return {
+      count: combined.length,
+      query: trimmedQuery,
+      task: trimmedTask,
+      intent: input.intent,
+      results: combined,
+    };
+  }
 
   return {
     count: results.length,

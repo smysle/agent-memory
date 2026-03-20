@@ -13,6 +13,6 @@ export default defineConfig({
   target: "node18",
   splitting: false,
   banner: {
-    js: "// AgentMemory v2 — Sleep-cycle memory for AI agents",
+    js: "// AgentMemory — Sleep-cycle memory for AI agents",
   },
 });

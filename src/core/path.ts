@@ -1,4 +1,4 @@
-// AgentMemory v2 — URI path system (from nocturne's Content-Path separation)
+// AgentMemory — URI path system (from nocturne's Content-Path separation)
 import type Database from "better-sqlite3";
 import { newId, now } from "./db.js";
 

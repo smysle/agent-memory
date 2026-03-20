@@ -1,4 +1,4 @@
-// AgentMemory v4 — SQLite database initialization and schema
+// AgentMemory — SQLite database initialization and schema
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 

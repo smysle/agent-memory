@@ -188,32 +188,38 @@ async function searchVectorBranch(
   });
 }
 
-/**
- * Expand results with related memories from the links table.
- * For each result in the top-K, query links and add related memories.
- */
-function expandRelated(
-  db: Database.Database,
-  results: HybridRecallResult[],
-  agentId: string,
-  maxTotal: number,
-): HybridRecallResult[] {
-  const existingIds = new Set(results.map((r) => r.memory.id));
-  const related: HybridRecallResult[] = [];
+export interface RelatedLink {
+  memory: Memory;
+  sourceId: string;
+  weight: number;
+}
 
-  for (const result of results) {
+/**
+ * Fetch related memories from the links table for a set of source memory IDs.
+ * Shared by both recall and surface expansion paths.
+ */
+export function fetchRelatedLinks(
+  db: Database.Database,
+  sourceIds: string[],
+  agentId: string,
+  excludeIds: Set<string>,
+  maxPerSource = 5,
+): RelatedLink[] {
+  const related: RelatedLink[] = [];
+
+  for (const sourceId of sourceIds) {
     const links = db.prepare(
       `SELECT l.target_id, l.weight, m.*
        FROM links l
        JOIN memories m ON m.id = l.target_id
        WHERE l.agent_id = ? AND l.source_id = ?
        ORDER BY l.weight DESC
-       LIMIT 5`,
-    ).all(agentId, result.memory.id) as Array<{ target_id: string; weight: number } & Memory>;
+       LIMIT ?`,
+    ).all(agentId, sourceId, maxPerSource) as Array<{ target_id: string; weight: number } & Memory>;
 
     for (const link of links) {
-      if (existingIds.has(link.target_id)) continue;
-      existingIds.add(link.target_id);
+      if (excludeIds.has(link.target_id)) continue;
+      excludeIds.add(link.target_id);
 
       const relatedMemory: Memory = {
         id: link.id,
@@ -238,12 +244,43 @@ function expandRelated(
 
       related.push({
         memory: relatedMemory,
-        score: result.score * link.weight * 0.6,
-        related_source_id: result.memory.id,
-        match_type: "related",
+        sourceId,
+        weight: link.weight,
       });
     }
   }
+
+  return related;
+}
+
+/**
+ * Expand results with related memories from the links table.
+ * For each result in the top-K, query links and add related memories.
+ */
+function expandRelated(
+  db: Database.Database,
+  results: HybridRecallResult[],
+  agentId: string,
+  maxTotal: number,
+): HybridRecallResult[] {
+  const existingIds = new Set(results.map((r) => r.memory.id));
+
+  const links = fetchRelatedLinks(
+    db,
+    results.map((r) => r.memory.id),
+    agentId,
+    existingIds,
+  );
+
+  const related: HybridRecallResult[] = links.map((link) => {
+    const sourceResult = results.find((r) => r.memory.id === link.sourceId);
+    return {
+      memory: link.memory,
+      score: (sourceResult?.score ?? 0) * link.weight * 0.6,
+      related_source_id: link.sourceId,
+      match_type: "related" as const,
+    };
+  });
 
   // Mark direct results
   const directResults = results.map((r) => ({

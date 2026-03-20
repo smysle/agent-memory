@@ -1,7 +1,7 @@
 {
   "name": "@smyslenny/agent-memory",
-  "version": "5.0.1",
-  "description": "Agent-native memory layer with lifecycle management for AI agents \u2014 SQLite-first, Write Guard, hybrid recall, MCP, CLI, and HTTP API.",
+  "version": "5.0.2",
+  "description": "Agent-native memory layer with lifecycle management for AI agents — SQLite-first, Write Guard, hybrid recall, MCP, CLI, and HTTP API.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -53,7 +53,8 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@node-rs/jieba": "^2.0.1",
     "better-sqlite3": "^11.8.1",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

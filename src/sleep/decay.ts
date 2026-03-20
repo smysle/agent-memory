@@ -1,4 +1,4 @@
-// AgentMemory v2 — Ebbinghaus forgetting curve decay engine
+// AgentMemory — Ebbinghaus forgetting curve decay engine
 // From PowerMem's cognitive science approach: R = e^(-t/S)
 import type Database from "better-sqlite3";
 import { now } from "../core/db.js";

@@ -1,4 +1,4 @@
-// AgentMemory v2 — Export memories to Markdown files
+// AgentMemory — Export memories to Markdown files
 import type Database from "better-sqlite3";
 import { listMemories, type Memory } from "./memory.js";
 import { writeFileSync, mkdirSync, existsSync } from "fs";

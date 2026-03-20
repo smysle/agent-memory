@@ -1,4 +1,4 @@
-// AgentMemory v4 — Main library entry point
+// AgentMemory — Main library entry point
 
 // App
 export { rememberMemory, type RememberInput } from "./app/remember.js";
@@ -57,10 +57,12 @@ export {
   fuseHybridResults,
   fusionScore,
   priorityPrior,
+  fetchRelatedLinks,
   type HybridRecallResult,
   type HybridRecallResponse,
   type ReindexEmbeddingsResult,
   type ReindexSearchResult,
+  type RelatedLink,
 } from "./search/hybrid.js";
 export {
   createOpenAICompatibleEmbeddingProvider,

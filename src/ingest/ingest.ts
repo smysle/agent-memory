@@ -1,4 +1,4 @@
-// AgentMemory v4 — Markdown ingest and structured extraction
+// AgentMemory — Markdown ingest and structured extraction
 import type Database from "better-sqlite3";
 import { syncOne } from "../sleep/sync.js";
 import type { MemoryType } from "../core/memory.js";

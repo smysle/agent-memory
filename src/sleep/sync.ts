@@ -1,4 +1,4 @@
-// AgentMemory v3 — Sleep sync engine (light sleep phase)
+// AgentMemory — Sleep sync engine (light sleep phase)
 // Captures new information, deduplicates, writes structured memories
 import type Database from "better-sqlite3";
 import { createMemory, type CreateMemoryInput, updateMemory } from "../core/memory.js";

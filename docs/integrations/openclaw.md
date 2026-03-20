@@ -2,7 +2,7 @@
 
 OpenClaw is a **good host example**, not a requirement for AgentMemory.
 
-If you are using OpenClaw, this guide shows how to integrate AgentMemory v4
+If you are using OpenClaw, this guide shows how to integrate AgentMemory v5
 without making OpenClaw-specific assumptions part of the product definition.
 
 ## When to use this guide

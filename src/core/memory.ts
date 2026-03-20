@@ -1,4 +1,4 @@
-// AgentMemory v4 — Memory CRUD operations
+// AgentMemory — Memory CRUD operations
 import { createHash } from "crypto";
 import type Database from "better-sqlite3";
 import { newId, now } from "./db.js";

@@ -1,4 +1,4 @@
-// AgentMemory v4 — semantic Write Guard (dedup + merge selection + four-criterion gate)
+// AgentMemory — semantic Write Guard (dedup + merge selection + four-criterion gate)
 import type Database from "better-sqlite3";
 import { recallMemories, type HybridRecallResult } from "../search/hybrid.js";
 import type { EmbeddingProvider } from "../search/embedding.js";

@@ -1,4 +1,4 @@
-// AgentMemory v2 — BM25 full-text search via SQLite FTS5
+// AgentMemory — BM25 full-text search via SQLite FTS5
 import type Database from "better-sqlite3";
 import type { Memory } from "../core/memory.js";
 import { tokenize, tokenizeForIndex } from "./tokenizer.js";

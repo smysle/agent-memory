@@ -459,5 +459,61 @@ describe("v5 Memory Intelligence", () => {
       // m2 should be filtered out by the after parameter
       // (but it depends on whether surface uses BM25/vector paths or fallback listing)
     });
+
+    it("surface with related=true expands linked memories", async () => {
+      // Create enough memories so that m2 falls below the limit cutoff
+      const m1 = createMemory(db, { content: "TypeScript 编译器配置 tsconfig 详解", type: "knowledge" })!;
+      // m2 has low vitality so it won't appear in fallback listing
+      const m2 = createMemory(db, { content: "代码格式化工具 Prettier 的默认规则集合", type: "knowledge" })!;
+      db.prepare("UPDATE memories SET vitality = 0.02 WHERE id = ?").run(m2.id);
+
+      // Manually link them
+      const ts = new Date().toISOString();
+      db.prepare(
+        "INSERT INTO links (agent_id, source_id, target_id, relation, weight, created_at) VALUES (?,?,?,?,?,?)",
+      ).run("default", m1.id, m2.id, "related", 0.85, ts);
+
+      const result = await surfaceMemories(db, {
+        query: "TypeScript tsconfig 编译器配置",
+        related: true,
+        limit: 10,
+        min_vitality: 0.05,
+        provider: null,
+      });
+
+      // m1 should be found directly
+      const directIds = result.results
+        .filter((r) => r.match_type === "direct")
+        .map((r) => r.memory.id);
+      expect(directIds).toContain(m1.id);
+
+      // m2 should be included as a related expansion (it was below min_vitality for direct search,
+      // but linked from m1)
+      const relatedResult = result.results.find((r) => r.memory.id === m2.id);
+      expect(relatedResult).toBeDefined();
+      expect(relatedResult!.related_source_id).toBe(m1.id);
+      expect(relatedResult!.match_type).toBe("related");
+    });
+
+    it("surface without related=true does not expand links", async () => {
+      const m1 = createMemory(db, { content: "Vite 构建工具热更新机制详解", type: "knowledge" })!;
+      const m2 = createMemory(db, { content: "HMR 热更新底层原理及 WebSocket 实现", type: "knowledge" })!;
+
+      const ts = new Date().toISOString();
+      db.prepare(
+        "INSERT INTO links (agent_id, source_id, target_id, relation, weight, created_at) VALUES (?,?,?,?,?,?)",
+      ).run("default", m1.id, m2.id, "related", 0.9, ts);
+
+      const result = await surfaceMemories(db, {
+        query: "Vite 构建工具热更新",
+        related: false,
+        limit: 5,
+        provider: null,
+      });
+
+      // Should NOT have any related-type results
+      const relatedResults = result.results.filter((r) => r.match_type === "related");
+      expect(relatedResults).toHaveLength(0);
+    });
   });
 });

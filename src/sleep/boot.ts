@@ -1,4 +1,4 @@
-// AgentMemory v4.1 — Boot loader with warm boot narrative support
+// AgentMemory — Boot loader with warm boot narrative support
 import type Database from "better-sqlite3";
 import type { Memory } from "../core/memory.js";
 import { getPathByUri } from "../core/path.js";

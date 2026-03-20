@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// AgentMemory v4 — CLI
+// AgentMemory — CLI
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { basename, resolve } from "path";
 import { openDatabase } from "../core/db.js";
@@ -28,7 +28,7 @@ function getAgentId(): string {
 
 function printHelp() {
   console.log(`
-🧠 AgentMemory v4 — Sleep-cycle memory for AI agents
+🧠 AgentMemory — Sleep-cycle memory for AI agents
 
 Usage: agent-memory <command> [options]
 

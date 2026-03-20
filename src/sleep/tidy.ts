@@ -1,4 +1,4 @@
-// AgentMemory v4 — Sleep tidy engine (deep sleep phase)
+// AgentMemory — Sleep tidy engine (deep sleep phase)
 // Compression / merge / archive only. Governance belongs in govern.ts.
 import type Database from "better-sqlite3";
 import { deleteMemory, type MemoryType } from "../core/memory.js";

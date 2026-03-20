@@ -1,4 +1,4 @@
-// AgentMemory v2 — Tokenizer with jieba Chinese segmentation
+// AgentMemory — Tokenizer with jieba Chinese segmentation
 // Uses @node-rs/jieba for proper Chinese word segmentation,
 // falls back to CJK bigram splitting if jieba unavailable.
 

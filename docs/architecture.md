@@ -4,7 +4,7 @@
   <img src="assets/architecture-diagram.jpg" alt="AgentMemory Architecture" width="800" />
 </p>
 
-AgentMemory v4 is a **SQLite-first, agent-native memory layer** with three
+AgentMemory v5 is a **SQLite-first, agent-native memory layer** with three
 independent but connected paths:
 
 1. **Write path** — capture durable memories safely

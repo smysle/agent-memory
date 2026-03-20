@@ -1,4 +1,4 @@
-// AgentMemory v4 — Governance cycle (memory health maintenance)
+// AgentMemory — Governance cycle (memory health maintenance)
 import type Database from "better-sqlite3";
 import { deleteMemory, type Memory } from "../core/memory.js";
 import { tokenize } from "../search/tokenizer.js";
