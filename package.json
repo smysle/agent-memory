@@ -1,6 +1,6 @@
 {
   "name": "@smyslenny/agent-memory",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "description": "Agent-native memory layer with lifecycle management for AI agents \u2014 SQLite-first, Write Guard, hybrid recall, MCP, CLI, and HTTP API.",
   "type": "module",
   "main": "dist/index.js",

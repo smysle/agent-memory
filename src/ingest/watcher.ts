@@ -31,6 +31,7 @@ export function runAutoIngestWatcher(options: AutoIngestWatcherOptions): AutoIng
   const memoryMdPath = join(workspaceDir, "MEMORY.md");
   const debounceMs = options.debounceMs ?? 1200;
   const initialScan = options.initialScan ?? true;
+  const ingestDaily = process.env.AGENT_MEMORY_AUTO_INGEST_DAILY === "1";
   const logger = options.logger ?? console;
 
   const timers = new Map<string, NodeJS.Timeout>();
@@ -55,6 +56,14 @@ export function runAutoIngestWatcher(options: AutoIngestWatcherOptions): AutoIng
   const isTrackedMarkdownFile = (absPath: string): boolean => {
     if (!absPath.endsWith(".md")) return false;
     if (resolve(absPath) === memoryMdPath) return true;
+
+    // Skip daily log files (YYYY-MM-DD.md) unless explicitly opted in.
+    // Daily logs are raw journals — only MEMORY.md (curated) should auto-ingest.
+    // Set AGENT_MEMORY_AUTO_INGEST_DAILY=1 to re-enable daily file ingestion.
+    if (!ingestDaily) {
+      const basename = absPath.split("/").pop() ?? "";
+      if (/^\d{4}-\d{2}-\d{2}\.md$/.test(basename)) return false;
+    }
 
     const rel = relative(memoryDir, absPath).replace(/\\/g, "/");
     if (rel.startsWith("..") || rel === "") return false;
