@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { EmbeddingProvider } from "../search/embedding.js";
 import { recallMemories, type HybridRecallResponse } from "../search/hybrid.js";
+import { recordPassiveFeedback } from "./feedback.js";
 
 export interface RecallInput {
   query: string;
@@ -12,6 +13,10 @@ export interface RecallInput {
   provider?: EmbeddingProvider | null;
   recordAccess?: boolean;
   emotion_tag?: string;
+  related?: boolean;
+  after?: string;
+  before?: string;
+  recency_boost?: number;
 }
 
 export async function recallMemory(
@@ -26,6 +31,10 @@ export async function recallMemory(
     vectorLimit: input.vectorLimit,
     provider: input.provider,
     recordAccess: input.recordAccess,
+    related: input.related,
+    after: input.after,
+    before: input.before,
+    recency_boost: input.recency_boost,
   });
 
   // Post-filter by emotion_tag if specified
@@ -33,6 +42,17 @@ export async function recallMemory(
     result.results = result.results
       .filter((r) => (r.memory as typeof r.memory & { emotion_tag?: string }).emotion_tag === input.emotion_tag)
       .slice(0, input.limit ?? 10);
+  }
+
+  // Record passive feedback for top-3 direct results
+  if (input.recordAccess !== false) {
+    const top3DirectIds = result.results
+      .filter((r) => r.match_type !== "related")
+      .slice(0, 3)
+      .map((r) => r.memory.id);
+    if (top3DirectIds.length > 0) {
+      recordPassiveFeedback(db, top3DirectIds, input.agent_id);
+    }
   }
 
   return result;

@@ -20,6 +20,7 @@ export {
   recordFeedbackEvent,
   getFeedbackScore,
   getFeedbackSummary,
+  recordPassiveFeedback,
   type FeedbackEventInput,
   type FeedbackEventRecord,
   type FeedbackSummary,
@@ -43,7 +44,7 @@ export {
   createPath, getPath, getPathByUri, getPathsByMemory, getPathsByDomain, getPathsByPrefix,
   deletePath, parseUri, type Path,
 } from "./core/path.js";
-export { guard, type GuardResult, type GuardAction, type GuardInput, type DedupScoreBreakdown } from "./core/guard.js";
+export { guard, type GuardResult, type GuardAction, type GuardInput, type DedupScoreBreakdown, type ConflictInfo, type ConflictType } from "./core/guard.js";
 export { buildMergePlan, type MergePlan, type MergeContext } from "./core/merge.js";
 export { exportMemories, type ExportResult } from "./core/export.js";
 
@@ -111,7 +112,7 @@ export { runAutoIngestWatcher, type AutoIngestWatcherOptions, type AutoIngestWat
 // Sleep
 export { calculateVitality, runDecay, getDecayedMemories } from "./sleep/decay.js";
 export { syncOne, syncBatch, type SyncInput, type SyncResult } from "./sleep/sync.js";
-export { runTidy, type TidyResult } from "./sleep/tidy.js";
+export { runTidy, isStaleContent, type TidyResult } from "./sleep/tidy.js";
 export { runGovern, rankEvictionCandidates, computeEvictionScore, type GovernResult, type EvictionCandidate } from "./sleep/govern.js";
 export {
   boot,

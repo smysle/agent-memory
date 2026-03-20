@@ -21,6 +21,8 @@ export function searchBM25(
     agent_id?: string;
     limit?: number;
     min_vitality?: number;
+    after?: string;
+    before?: string;
   },
 ): SearchResult[] {
   const limit = opts?.limit ?? 20;
@@ -31,18 +33,30 @@ export function searchBM25(
   if (!ftsQuery) return [];
 
   try {
+    const conditions = ["memories_fts MATCH ?", "m.agent_id = ?", "m.vitality >= ?"];
+    const params: unknown[] = [ftsQuery, agentId, minVitality];
+
+    if (opts?.after) {
+      conditions.push("m.updated_at >= ?");
+      params.push(opts.after);
+    }
+    if (opts?.before) {
+      conditions.push("m.updated_at <= ?");
+      params.push(opts.before);
+    }
+
+    params.push(limit);
+
     const rows = db
       .prepare(
         `SELECT m.*, rank AS score
          FROM memories_fts f
          JOIN memories m ON m.id = f.id
-         WHERE memories_fts MATCH ?
-           AND m.agent_id = ?
-           AND m.vitality >= ?
+         WHERE ${conditions.join(" AND ")}
          ORDER BY rank
          LIMIT ?`,
       )
-      .all(ftsQuery, agentId, minVitality, limit) as Array<Memory & { score: number }>;
+      .all(...params) as Array<Memory & { score: number }>;
 
     return rows.map((row, index) => {
       const { score: _score, ...memoryFields } = row;

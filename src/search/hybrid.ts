@@ -19,6 +19,8 @@ export interface HybridRecallResult {
   vector_rank?: number;
   bm25_score?: number;
   vector_score?: number;
+  related_source_id?: string;
+  match_type?: "direct" | "related";
 }
 
 export interface HybridRecallResponse {
@@ -36,6 +38,10 @@ export interface RecallOptions {
   vectorLimit?: number;
   provider?: EmbeddingProvider | null;
   recordAccess?: boolean;
+  related?: boolean;
+  after?: string;
+  before?: string;
+  recency_boost?: number;
 }
 
 export interface ReindexOptions {
@@ -97,16 +103,26 @@ export function fusionScore(input: {
   memory: Memory;
   bm25Rank?: number;
   vectorRank?: number;
+  recency_boost?: number;
 }): number {
   const lexical = input.bm25Rank ? 0.45 / (60 + input.bm25Rank) : 0;
   const semantic = input.vectorRank ? 0.45 / (60 + input.vectorRank) : 0;
-  return lexical + semantic + 0.05 * priorityPrior(input.memory.priority) + 0.05 * input.memory.vitality;
+  const baseScore = lexical + semantic + 0.05 * priorityPrior(input.memory.priority) + 0.05 * input.memory.vitality;
+
+  const boost = input.recency_boost ?? 0;
+  if (boost <= 0) return baseScore;
+
+  const updatedAt = new Date(input.memory.updated_at).getTime();
+  const daysSince = Math.max(0, (Date.now() - updatedAt) / (1000 * 60 * 60 * 24));
+  const recencyScore = Math.exp(-daysSince / 30);
+  return (1 - boost) * baseScore + boost * recencyScore;
 }
 
 export function fuseHybridResults(
   lexical: SearchResult[],
   vector: VectorSearchResult[],
   limit: number,
+  recency_boost?: number,
 ): HybridRecallResult[] {
   const candidates = new Map<string, HybridRecallResult>();
 
@@ -116,6 +132,7 @@ export function fuseHybridResults(
       score: 0,
       bm25_rank: row.rank,
       bm25_score: row.score,
+      match_type: "direct",
     });
   }
 
@@ -130,6 +147,7 @@ export function fuseHybridResults(
         score: 0,
         vector_rank: row.rank,
         vector_score: row.similarity,
+        match_type: "direct",
       });
     }
   }
@@ -137,7 +155,7 @@ export function fuseHybridResults(
   return [...candidates.values()]
     .map((row) => ({
       ...row,
-      score: fusionScore({ memory: row.memory, bm25Rank: row.bm25_rank, vectorRank: row.vector_rank }),
+      score: fusionScore({ memory: row.memory, bm25Rank: row.bm25_rank, vectorRank: row.vector_rank, recency_boost }),
     }))
     .sort((left, right) => {
       if (right.score !== left.score) return right.score - left.score;
@@ -154,6 +172,8 @@ async function searchVectorBranch(
     agent_id: string;
     limit: number;
     min_vitality: number;
+    after?: string;
+    before?: string;
   },
 ): Promise<VectorSearchResult[]> {
   const [queryVector] = await opts.provider.embed([query]);
@@ -163,7 +183,80 @@ async function searchVectorBranch(
     agent_id: opts.agent_id,
     limit: opts.limit,
     min_vitality: opts.min_vitality,
+    after: opts.after,
+    before: opts.before,
   });
+}
+
+/**
+ * Expand results with related memories from the links table.
+ * For each result in the top-K, query links and add related memories.
+ */
+function expandRelated(
+  db: Database.Database,
+  results: HybridRecallResult[],
+  agentId: string,
+  maxTotal: number,
+): HybridRecallResult[] {
+  const existingIds = new Set(results.map((r) => r.memory.id));
+  const related: HybridRecallResult[] = [];
+
+  for (const result of results) {
+    const links = db.prepare(
+      `SELECT l.target_id, l.weight, m.*
+       FROM links l
+       JOIN memories m ON m.id = l.target_id
+       WHERE l.agent_id = ? AND l.source_id = ?
+       ORDER BY l.weight DESC
+       LIMIT 5`,
+    ).all(agentId, result.memory.id) as Array<{ target_id: string; weight: number } & Memory>;
+
+    for (const link of links) {
+      if (existingIds.has(link.target_id)) continue;
+      existingIds.add(link.target_id);
+
+      const relatedMemory: Memory = {
+        id: link.id,
+        content: link.content,
+        type: link.type,
+        priority: link.priority,
+        emotion_val: link.emotion_val,
+        vitality: link.vitality,
+        stability: link.stability,
+        access_count: link.access_count,
+        last_accessed: link.last_accessed,
+        created_at: link.created_at,
+        updated_at: link.updated_at,
+        source: link.source,
+        agent_id: link.agent_id,
+        hash: link.hash,
+        emotion_tag: link.emotion_tag,
+        source_session: (link as unknown as Record<string, unknown>).source_session as string | null ?? null,
+        source_context: (link as unknown as Record<string, unknown>).source_context as string | null ?? null,
+        observed_at: (link as unknown as Record<string, unknown>).observed_at as string | null ?? null,
+      };
+
+      related.push({
+        memory: relatedMemory,
+        score: result.score * link.weight * 0.6,
+        related_source_id: result.memory.id,
+        match_type: "related",
+      });
+    }
+  }
+
+  // Mark direct results
+  const directResults = results.map((r) => ({
+    ...r,
+    match_type: "direct" as const,
+  }));
+
+  // Combine and limit
+  const combined = [...directResults, ...related]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxTotal);
+
+  return combined;
 }
 
 export async function recallMemories(
@@ -177,11 +270,16 @@ export async function recallMemories(
   const lexicalLimit = opts?.lexicalLimit ?? Math.max(limit * 2, limit);
   const vectorLimit = opts?.vectorLimit ?? Math.max(limit * 2, limit);
   const provider = opts?.provider === undefined ? getEmbeddingProviderFromEnv() : opts.provider;
+  const recencyBoost = opts?.recency_boost;
+  const after = opts?.after;
+  const before = opts?.before;
 
   const lexical = searchBM25(db, query, {
     agent_id: agentId,
     limit: lexicalLimit,
     min_vitality: minVitality,
+    after,
+    before,
   });
 
   let vector: VectorSearchResult[] = [];
@@ -192,6 +290,8 @@ export async function recallMemories(
         agent_id: agentId,
         limit: vectorLimit,
         min_vitality: minVitality,
+        after,
+        before,
       });
     } catch {
       vector = [];
@@ -204,13 +304,21 @@ export async function recallMemories(
       ? "vector-only"
       : "bm25-only";
 
-  const results = mode === "bm25-only"
+  let results = mode === "bm25-only"
     ? scoreBm25Only(lexical, limit)
-    : fuseHybridResults(lexical, vector, limit);
+    : fuseHybridResults(lexical, vector, limit, recencyBoost);
+
+  // Expand related if requested
+  if (opts?.related) {
+    const maxTotal = Math.floor(limit * 1.5);
+    results = expandRelated(db, results, agentId, maxTotal);
+  }
 
   if (opts?.recordAccess !== false) {
     for (const row of results) {
-      recordAccess(db, row.memory.id);
+      if (row.match_type !== "related") {
+        recordAccess(db, row.memory.id);
+      }
     }
   }
 

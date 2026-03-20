@@ -10,6 +10,16 @@ import { contentHash, type CreateMemoryInput, type Memory } from "./memory.js";
 
 export type GuardAction = "add" | "update" | "skip" | "merge";
 
+export type ConflictType = "negation" | "value" | "status";
+
+export interface ConflictInfo {
+  memoryId: string;
+  content: string;
+  conflict_score: number;
+  conflict_type: ConflictType;
+  detail: string;
+}
+
 export interface DedupScoreBreakdown {
   semantic_similarity: number;
   lexical_overlap: number;
@@ -27,6 +37,11 @@ export interface GuardResult {
   mergedContent?: string;
   mergePlan?: MergePlan;
   score?: DedupScoreBreakdown;
+  candidates?: Array<{
+    memoryId: string;
+    dedup_score: number;
+  }>;
+  conflicts?: ConflictInfo[];
 }
 
 export interface GuardInput extends CreateMemoryInput {
@@ -35,6 +50,7 @@ export interface GuardInput extends CreateMemoryInput {
   candidateLimit?: number;
   conservative?: boolean;
   now?: string;
+  observed_at?: string;
 }
 
 interface GuardCandidate {
@@ -111,7 +127,15 @@ function uriScopeMatch(inputUri?: string, candidateUri?: string | null): number 
   return 0.2;
 }
 
-function extractObservedAt(parts: Array<string | null | undefined>, fallback?: string | null): Date | null {
+function extractObservedAt(parts: Array<string | null | undefined>, fallback?: string | null, observedAt?: string | null): Date | null {
+  // Priority: explicit observed_at > regex from content/uri/source > fallback (created_at)
+  if (observedAt) {
+    const parsed = new Date(observedAt);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed;
+    }
+  }
+
   for (const part of parts) {
     if (!part) continue;
     const match = part.match(/(20\d{2}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}(?::\d{2})?))?/);
@@ -138,8 +162,16 @@ function timeProximity(input: GuardInput, memory: Memory, candidateUri?: string 
     return 1;
   }
 
-  const inputTime = extractObservedAt([input.uri, input.source, input.content], input.now ?? null);
-  const existingTime = extractObservedAt([candidateUri, memory.source, memory.content], memory.created_at);
+  const inputTime = extractObservedAt(
+    [input.uri, input.source, input.content],
+    input.now ?? null,
+    input.observed_at ?? null,
+  );
+  const existingTime = extractObservedAt(
+    [candidateUri, memory.source, memory.content],
+    memory.created_at,
+    (memory as Memory & { observed_at?: string | null }).observed_at ?? null,
+  );
   if (!inputTime || !existingTime) {
     return 0.5;
   }
@@ -258,6 +290,85 @@ function fourCriterionGate(input: CreateMemoryInput): GateResult {
   };
 }
 
+/**
+ * Conflict Detection — check if new content conflicts with an existing candidate.
+ * Returns a ConflictInfo if conflict_score > 0.5, otherwise null.
+ */
+
+const NEGATION_PATTERNS = /\b(不|没|禁止|无法|取消|no|not|never|don't|doesn't|isn't|aren't|won't|can't|cannot|shouldn't)\b/i;
+const STATUS_DONE_PATTERNS = /\b(完成|已完成|已修复|已解决|已关闭|DONE|FIXED|RESOLVED|CLOSED|SHIPPED|CANCELLED|取消|放弃|已取消|已放弃|ABANDONED)\b/i;
+const STATUS_ACTIVE_PATTERNS = /\b(正在|进行中|待办|TODO|WIP|IN.?PROGRESS|PENDING|WORKING|处理中|部署中|开发中|DEPLOYING)\b/i;
+
+function extractNumbers(text: string): string[] {
+  // Extract version numbers, IPs, ports, etc.
+  return (text.match(/\d+(?:\.\d+)+|\b\d{2,}\b/g) ?? []);
+}
+
+function detectConflict(inputContent: string, candidateContent: string, candidateId: string): ConflictInfo | null {
+  let conflictScore = 0;
+  let conflictType: ConflictType = "negation";
+  const details: string[] = [];
+
+  // 1. Negation detection
+  const inputHasNegation = NEGATION_PATTERNS.test(inputContent);
+  const candidateHasNegation = NEGATION_PATTERNS.test(candidateContent);
+  if (inputHasNegation !== candidateHasNegation) {
+    conflictScore += 0.4;
+    conflictType = "negation";
+    details.push("negation mismatch");
+  }
+
+  // 2. Value/number conflict
+  const inputNumbers = extractNumbers(inputContent);
+  const candidateNumbers = extractNumbers(candidateContent);
+  if (inputNumbers.length > 0 && candidateNumbers.length > 0) {
+    // Check if there are differing numbers for seemingly same entities
+    const inputSet = new Set(inputNumbers);
+    const candidateSet = new Set(candidateNumbers);
+    const hasCommon = [...inputSet].some((n) => candidateSet.has(n));
+    const hasDiff = [...inputSet].some((n) => !candidateSet.has(n)) || [...candidateSet].some((n) => !inputSet.has(n));
+    if (hasDiff && !hasCommon) {
+      conflictScore += 0.3;
+      conflictType = "value";
+      details.push(`value diff: [${inputNumbers.join(",")}] vs [${candidateNumbers.join(",")}]`);
+    }
+  }
+
+  // 3. Status conflict
+  const inputDone = STATUS_DONE_PATTERNS.test(inputContent);
+  const inputActive = STATUS_ACTIVE_PATTERNS.test(inputContent);
+  const candidateDone = STATUS_DONE_PATTERNS.test(candidateContent);
+  const candidateActive = STATUS_ACTIVE_PATTERNS.test(candidateContent);
+  if ((inputDone && candidateActive) || (inputActive && candidateDone)) {
+    conflictScore += 0.3;
+    conflictType = "status";
+    details.push("status contradiction (done vs active)");
+  }
+
+  if (conflictScore <= 0.5) return null;
+
+  return {
+    memoryId: candidateId,
+    content: candidateContent,
+    conflict_score: Math.min(1, conflictScore),
+    conflict_type: conflictType,
+    detail: details.join("; "),
+  };
+}
+
+function detectConflicts(inputContent: string, candidates: GuardCandidate[]): ConflictInfo[] {
+  const conflicts: ConflictInfo[] = [];
+  for (const candidate of candidates) {
+    // Conflict detection range: dedup_score >= 0.60 (no upper limit)
+    if (candidate.score.dedup_score < 0.60) continue;
+    const conflict = detectConflict(inputContent, candidate.result.memory.content, candidate.result.memory.id);
+    if (conflict) {
+      conflicts.push(conflict);
+    }
+  }
+  return conflicts;
+}
+
 export async function guard(
   db: Database.Database,
   input: GuardInput,
@@ -298,14 +409,38 @@ export async function guard(
 
   // 3~5. hybrid candidate recall + semantic scoring + merge policy selection
   const candidates = await recallCandidates(db, input, agentId);
+
+  // Build candidates list for GuardResult
+  const candidatesList = candidates.map((c) => ({
+    memoryId: c.result.memory.id,
+    dedup_score: c.score.dedup_score,
+  }));
+
+  // Run conflict detection across all qualifying candidates
+  const conflicts = detectConflicts(input.content, candidates);
+
   const best = candidates[0];
 
   if (!best) {
-    return { action: "add", reason: "No relevant semantic candidates found" };
+    return { action: "add", reason: "No relevant semantic candidates found", candidates: candidatesList };
   }
 
   const score = best.score;
   if (score.dedup_score >= NEAR_EXACT_THRESHOLD) {
+    // Check conflict override: if status/value conflict detected, force update instead of skip
+    const bestConflict = conflicts.find((c) => c.memoryId === best.result.memory.id);
+    if (bestConflict && (bestConflict.conflict_type === "status" || bestConflict.conflict_type === "value")) {
+      return {
+        action: "update",
+        reason: `Conflict override: ${bestConflict.conflict_type} conflict detected despite high dedup score (${score.dedup_score.toFixed(3)})`,
+        existingId: best.result.memory.id,
+        updatedContent: input.content,
+        score,
+        candidates: candidatesList,
+        conflicts,
+      };
+    }
+
     const shouldUpdateMetadata = Boolean(input.uri && !getPathByUri(db, input.uri, agentId));
     return {
       action: shouldUpdateMetadata ? "update" : "skip",
@@ -314,6 +449,8 @@ export async function guard(
         : `Near-exact duplicate detected (score=${score.dedup_score.toFixed(3)})`,
       existingId: best.result.memory.id,
       score,
+      candidates: candidatesList,
+      conflicts: conflicts.length > 0 ? conflicts : undefined,
     };
   }
 
@@ -334,6 +471,8 @@ export async function guard(
       mergedContent: mergePlan.content,
       mergePlan,
       score,
+      candidates: candidatesList,
+      conflicts: conflicts.length > 0 ? conflicts : undefined,
     };
   }
 
@@ -341,5 +480,7 @@ export async function guard(
     action: "add",
     reason: `Semantic score below merge threshold (score=${score.dedup_score.toFixed(3)})`,
     score,
+    candidates: candidatesList,
+    conflicts: conflicts.length > 0 ? conflicts : undefined,
   };
 }

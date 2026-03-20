@@ -25,6 +25,9 @@ export interface Memory {
   agent_id: string;
   hash: string | null;
   emotion_tag: string | null;
+  source_session: string | null;
+  source_context: string | null;
+  observed_at: string | null;
 }
 
 export interface CreateMemoryInput {
@@ -36,6 +39,9 @@ export interface CreateMemoryInput {
   agent_id?: string;
   embedding_provider_id?: string | null;
   emotion_tag?: string;
+  source_session?: string;
+  source_context?: string;
+  observed_at?: string;
 }
 
 export interface UpdateMemoryInput {
@@ -107,11 +113,13 @@ export function createMemory(db: Database.Database, input: CreateMemoryInput): M
 
   const id = newId();
   const timestamp = now();
+  const sourceContext = input.source_context ? input.source_context.slice(0, 200) : null;
 
   db.prepare(
     `INSERT INTO memories (id, content, type, priority, emotion_val, vitality, stability,
-     access_count, created_at, updated_at, source, agent_id, hash, emotion_tag)
-     VALUES (?, ?, ?, ?, ?, 1.0, ?, 0, ?, ?, ?, ?, ?, ?)`,
+     access_count, created_at, updated_at, source, agent_id, hash, emotion_tag,
+     source_session, source_context, observed_at)
+     VALUES (?, ?, ?, ?, ?, 1.0, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.content,
@@ -125,6 +133,9 @@ export function createMemory(db: Database.Database, input: CreateMemoryInput): M
     agentId,
     hash,
     input.emotion_tag ?? null,
+    input.source_session ?? null,
+    sourceContext,
+    input.observed_at ?? null,
   );
 
   // Sync to FTS index (tokenized for CJK support)

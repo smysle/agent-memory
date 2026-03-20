@@ -21,6 +21,10 @@ export interface SurfaceInput {
   provider?: EmbeddingProvider | null;
   min_vitality?: number;
   emotion_tag?: string;
+  related?: boolean;
+  after?: string;
+  before?: string;
+  recency_boost?: number;
 }
 
 export interface SurfaceResult {
@@ -240,6 +244,8 @@ export async function surfaceMemories(
         agent_id: agentId,
         limit: lexicalWindow,
         min_vitality: minVitality,
+        after: input.after,
+        before: input.before,
       }),
       "queryRank",
     );
@@ -252,6 +258,8 @@ export async function surfaceMemories(
         agent_id: agentId,
         limit: lexicalWindow,
         min_vitality: minVitality,
+        after: input.after,
+        before: input.before,
       }),
       "taskRank",
     );
@@ -264,6 +272,8 @@ export async function surfaceMemories(
         agent_id: agentId,
         limit: lexicalWindow,
         min_vitality: minVitality,
+        after: input.after,
+        before: input.before,
       }),
       "recentRank",
     );
@@ -279,6 +289,8 @@ export async function surfaceMemories(
           agent_id: agentId,
           limit: lexicalWindow,
           min_vitality: minVitality,
+          after: input.after,
+          before: input.before,
         });
         const similarity = new Map(vectorRows.map((row) => [row.memory.id, row.similarity]));
         collectBranch(signals, vectorRows, "semanticRank", similarity);

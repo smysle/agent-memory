@@ -14,6 +14,9 @@ export interface RememberInput {
   provider?: EmbeddingProvider | null;
   conservative?: boolean;
   emotion_tag?: string;
+  source_session?: string;
+  source_context?: string;
+  observed_at?: string;
 }
 
 export async function rememberMemory(
@@ -31,5 +34,8 @@ export async function rememberMemory(
     provider: input.provider,
     conservative: input.conservative,
     emotion_tag: input.emotion_tag,
+    source_session: input.source_session,
+    source_context: input.source_context,
+    observed_at: input.observed_at,
   });
 }

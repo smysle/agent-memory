@@ -2,7 +2,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 const SCHEMA_SQL = `
 -- Memory entries
@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS memories (
   agent_id      TEXT NOT NULL DEFAULT 'default',
   hash          TEXT,
   emotion_tag   TEXT,
+  source_session TEXT,
+  source_context TEXT,
+  observed_at   TEXT,
   UNIQUE(hash, agent_id)
 );
 
@@ -227,6 +230,11 @@ function migrateDatabase(db: Database.Database, from: number, to: number): void 
       v = 6;
       continue;
     }
+    if (v === 6) {
+      migrateV6ToV7(db);
+      v = 7;
+      continue;
+    }
     throw new Error(`Unsupported schema migration path: v${from} → v${to} (stuck at v${v})`);
   }
 }
@@ -336,7 +344,11 @@ function inferSchemaVersion(db: Database.Database): number {
   const hasFeedbackEvents = tableExists(db, "feedback_events");
 
   const hasEmotionTag = tableHasColumn(db, "memories", "emotion_tag");
+  const hasProvenance = tableHasColumn(db, "memories", "source_session")
+    && tableHasColumn(db, "memories", "source_context")
+    && tableHasColumn(db, "memories", "observed_at");
 
+  if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings && hasMaintenanceJobs && hasFeedbackEvents && hasEmotionTag && hasProvenance) return 7;
   if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings && hasMaintenanceJobs && hasFeedbackEvents && hasEmotionTag) return 6;
   if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings && hasMaintenanceJobs && hasFeedbackEvents) return 5;
   if (hasAgentScopedPaths && hasAgentScopedLinks && hasV4Embeddings) return 4;
@@ -369,6 +381,11 @@ function ensureIndexes(db: Database.Database): void {
   if (tableHasColumn(db, "memories", "emotion_tag")) {
     db.exec("CREATE INDEX IF NOT EXISTS idx_memories_emotion_tag ON memories(emotion_tag) WHERE emotion_tag IS NOT NULL;");
   }
+  if (tableHasColumn(db, "memories", "observed_at")) {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memories_observed_at ON memories(observed_at) WHERE observed_at IS NOT NULL;");
+  }
+  // Ensure updated_at index for temporal queries
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memories_updated_at ON memories(updated_at);");
   if (tableExists(db, "feedback_events")) {
     db.exec("CREATE INDEX IF NOT EXISTS idx_feedback_events_memory ON feedback_events(memory_id, created_at DESC);");
     if (tableHasColumn(db, "feedback_events", "agent_id") && tableHasColumn(db, "feedback_events", "source")) {
@@ -529,6 +546,38 @@ function migrateV5ToV6(db: Database.Database): void {
     db.exec("ALTER TABLE memories ADD COLUMN emotion_tag TEXT;");
     db.exec("CREATE INDEX IF NOT EXISTS idx_memories_emotion_tag ON memories(emotion_tag) WHERE emotion_tag IS NOT NULL;");
     db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)").run(String(6));
+    db.exec("COMMIT");
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw e;
+  }
+}
+
+function migrateV6ToV7(db: Database.Database): void {
+  // v7 adds provenance columns: source_session, source_context, observed_at
+  const alreadyMigrated = tableHasColumn(db, "memories", "source_session")
+    && tableHasColumn(db, "memories", "source_context")
+    && tableHasColumn(db, "memories", "observed_at");
+
+  if (alreadyMigrated) {
+    db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)").run(String(7));
+    return;
+  }
+
+  try {
+    db.exec("BEGIN");
+    if (!tableHasColumn(db, "memories", "source_session")) {
+      db.exec("ALTER TABLE memories ADD COLUMN source_session TEXT;");
+    }
+    if (!tableHasColumn(db, "memories", "source_context")) {
+      db.exec("ALTER TABLE memories ADD COLUMN source_context TEXT;");
+    }
+    if (!tableHasColumn(db, "memories", "observed_at")) {
+      db.exec("ALTER TABLE memories ADD COLUMN observed_at TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memories_observed_at ON memories(observed_at) WHERE observed_at IS NOT NULL;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memories_updated_at ON memories(updated_at);");
+    db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)").run(String(7));
     db.exec("COMMIT");
   } catch (e) {
     try { db.exec("ROLLBACK"); } catch {}

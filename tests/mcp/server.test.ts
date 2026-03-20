@@ -5,7 +5,7 @@ import { unlinkSync } from "fs";
 const TEST_DB = "/tmp/agent-memory-mcp-test.db";
 
 describe("MCP server tools", () => {
-  it("registers expected 10 tools (no link/snapshot, includes reindex)", () => {
+  it("registers expected 11 tools (includes link and reindex)", () => {
     try { unlinkSync(TEST_DB); } catch {}
     try { unlinkSync(TEST_DB + "-wal"); } catch {}
     try { unlinkSync(TEST_DB + "-shm"); } catch {}
@@ -14,11 +14,12 @@ describe("MCP server tools", () => {
     const toolMap = (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools;
     const names = Object.keys(toolMap).sort();
 
-    expect(names).toHaveLength(10);
+    expect(names).toHaveLength(11);
     expect(names).toEqual([
       "boot",
       "forget",
       "ingest",
+      "link",
       "recall",
       "recall_path",
       "reflect",
@@ -28,7 +29,6 @@ describe("MCP server tools", () => {
       "surface",
     ]);
 
-    expect(names).not.toContain("link");
     expect(names).not.toContain("snapshot");
 
     db.close();

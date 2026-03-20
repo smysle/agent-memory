@@ -199,7 +199,7 @@ describe("HTTP transport", () => {
 
     const status = await requestJson<{ total: number; feedback_events: number }>(port, "GET", "/v1/status");
     expect(status.total).toBe(1);
-    expect(status.feedback_events).toBe(1);
+    expect(status.feedback_events).toBeGreaterThanOrEqual(1); // includes passive feedback from recall
 
     const reflectEvents = await requestSse(port, "/v1/reflect", { phase: "all" });
     expect(reflectEvents.some((event) => event.event === "progress")).toBe(true);

@@ -2,7 +2,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { openDatabase } from "../core/db.js";
+import { openDatabase, newId, now as dbNow } from "../core/db.js";
 import {
   getMemory,
   updateMemory,
@@ -35,6 +35,9 @@ function formatMemory(memory: Memory, score?: number) {
     vitality: memory.vitality,
     score,
     updated_at: memory.updated_at,
+    source_session: memory.source_session ?? undefined,
+    source_context: memory.source_context ?? undefined,
+    observed_at: memory.observed_at ?? undefined,
   };
 }
 
@@ -152,6 +155,8 @@ function formatRecallPayload(result: Awaited<ReturnType<typeof recallMemory>>) {
       vector_rank: row.vector_rank,
       bm25_score: row.bm25_score,
       vector_score: row.vector_score,
+      related_source_id: row.related_source_id,
+      match_type: row.match_type,
     })),
   };
 }
@@ -176,6 +181,9 @@ function formatSurfacePayload(result: Awaited<ReturnType<typeof surfaceMemories>
       feedback_score: row.feedback_score,
       reason_codes: row.reason_codes,
       updated_at: row.memory.updated_at,
+      source_session: row.memory.source_session ?? undefined,
+      source_context: row.memory.source_context ?? undefined,
+      observed_at: row.memory.observed_at ?? undefined,
     })),
   };
 }
@@ -186,7 +194,7 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
 
   const server = new McpServer({
     name: "agent-memory",
-    version: "4.0.0-alpha.1",
+    version: "5.0.0",
   });
 
   server.tool(
@@ -200,9 +208,18 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
       source: z.string().optional().describe("Source annotation (e.g. session ID, date)"),
       agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
       emotion_tag: z.string().optional().describe("Emotion label for emotion-type memories (e.g. 安心, 开心, 担心)"),
+      session_id: z.string().optional().describe("Source session ID for provenance tracking"),
+      context: z.string().optional().describe("Trigger context for this memory (≤200 chars, auto-truncated)"),
+      observed_at: z.string().optional().describe("When the event actually happened (ISO 8601), distinct from write time"),
     },
-    async ({ content, type, uri, emotion_val, source, agent_id, emotion_tag }) => {
-      const result = await rememberMemory(db, { content, type, uri, emotion_val, source, agent_id: agent_id ?? aid, emotion_tag });
+    async ({ content, type, uri, emotion_val, source, agent_id, emotion_tag, session_id, context, observed_at }) => {
+      const result = await rememberMemory(db, {
+        content, type, uri, emotion_val, source,
+        agent_id: agent_id ?? aid, emotion_tag,
+        source_session: session_id,
+        source_context: context,
+        observed_at,
+      });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
   );
@@ -215,9 +232,18 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
       limit: z.number().default(10).describe("Max results to return"),
       agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
       emotion_tag: z.string().optional().describe("Filter results by emotion tag (e.g. 安心, 开心)"),
+      related: z.boolean().default(false).optional().describe("Expand results with related memories from the links table"),
+      after: z.string().optional().describe("Only return memories updated after this ISO 8601 timestamp"),
+      before: z.string().optional().describe("Only return memories updated before this ISO 8601 timestamp"),
+      recency_boost: z.number().min(0).max(1).default(0).optional().describe("Recency bias (0=none, 1=max). Higher values favor recently updated memories"),
     },
-    async ({ query, limit, agent_id, emotion_tag }) => {
-      const result = await recallMemory(db, { query, limit, agent_id: agent_id ?? aid, emotion_tag });
+    async ({ query, limit, agent_id, emotion_tag, related, after, before, recency_boost }) => {
+      const result = await recallMemory(db, {
+        query, limit, agent_id: agent_id ?? aid, emotion_tag,
+        related: related ?? false,
+        after, before,
+        recency_boost: recency_boost ?? 0,
+      });
       return { content: [{ type: "text" as const, text: JSON.stringify(formatRecallPayload(result), null, 2) }] };
     },
   );
@@ -427,8 +453,12 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
       limit: z.number().min(1).max(20).default(5).optional().describe("Max results (default 5, max 20)"),
       agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
       keywords: z.array(z.string()).optional().describe("Deprecated alias: joined into query when query is omitted"),
+      related: z.boolean().default(false).optional().describe("Expand results with related memories from the links table"),
+      after: z.string().optional().describe("Only return memories updated after this ISO 8601 timestamp"),
+      before: z.string().optional().describe("Only return memories updated before this ISO 8601 timestamp"),
+      recency_boost: z.number().min(0).max(1).default(0).optional().describe("Recency bias (0=none, 1=max)"),
     },
-    async ({ query, task, recent_turns, intent, types, limit, agent_id, keywords }) => {
+    async ({ query, task, recent_turns, intent, types, limit, agent_id, keywords, related, after, before, recency_boost }) => {
       const resolvedQuery = query ?? keywords?.join(" ");
       const result = await surfaceMemories(db, {
         query: resolvedQuery,
@@ -438,6 +468,10 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
         types,
         limit: limit ?? 5,
         agent_id: agent_id ?? aid,
+        related: related ?? false,
+        after,
+        before,
+        recency_boost: recency_boost ?? 0,
       });
 
       return {
@@ -445,6 +479,47 @@ export function createMcpServer(dbPath?: string, agentId?: string): { server: Mc
           type: "text" as const,
           text: JSON.stringify(formatSurfacePayload(result), null, 2),
         }],
+      };
+    },
+  );
+
+  server.tool(
+    "link",
+    "Manually create or remove an association between two memories.",
+    {
+      source_id: z.string().describe("Source memory ID"),
+      target_id: z.string().describe("Target memory ID"),
+      relation: z.enum(["related", "supersedes", "contradicts"]).default("related").describe("Relation type"),
+      weight: z.number().min(0).max(1).default(1.0).optional().describe("Link weight (0-1)"),
+      remove: z.boolean().default(false).optional().describe("Remove the link instead of creating it"),
+      agent_id: z.string().optional().describe("Override agent scope (defaults to current agent)"),
+    },
+    async ({ source_id, target_id, relation, weight, remove, agent_id }) => {
+      const effectiveAgentId = agent_id ?? aid;
+
+      if (remove) {
+        const result = db.prepare(
+          "DELETE FROM links WHERE agent_id = ? AND source_id = ? AND target_id = ?",
+        ).run(effectiveAgentId, source_id, target_id);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ action: "removed", changes: result.changes }) }],
+        };
+      }
+
+      const timestamp = dbNow();
+      db.prepare(
+        `INSERT OR REPLACE INTO links (agent_id, source_id, target_id, relation, weight, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(effectiveAgentId, source_id, target_id, relation, weight ?? 1.0, timestamp);
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({
+          action: "created",
+          source_id,
+          target_id,
+          relation,
+          weight: weight ?? 1.0,
+        }) }],
       };
     },
   );

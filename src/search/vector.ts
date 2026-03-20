@@ -166,11 +166,32 @@ export function searchByVector(
     agent_id?: string;
     limit?: number;
     min_vitality?: number;
+    after?: string;
+    before?: string;
   },
 ): VectorSearchResult[] {
   const limit = opts.limit ?? 20;
   const agentId = opts.agent_id ?? "default";
   const minVitality = opts.min_vitality ?? 0;
+
+  const conditions = [
+    "e.provider_id = ?",
+    "e.status = 'ready'",
+    "e.vector IS NOT NULL",
+    "e.content_hash = m.hash",
+    "m.agent_id = ?",
+    "m.vitality >= ?",
+  ];
+  const params: unknown[] = [opts.providerId, agentId, minVitality];
+
+  if (opts.after) {
+    conditions.push("m.updated_at >= ?");
+    params.push(opts.after);
+  }
+  if (opts.before) {
+    conditions.push("m.updated_at <= ?");
+    params.push(opts.before);
+  }
 
   const rows = db.prepare(
     `SELECT e.provider_id, e.vector, e.content_hash,
@@ -179,13 +200,8 @@ export function searchByVector(
             m.updated_at, m.source, m.agent_id, m.hash
      FROM embeddings e
      JOIN memories m ON m.id = e.memory_id
-     WHERE e.provider_id = ?
-       AND e.status = 'ready'
-       AND e.vector IS NOT NULL
-       AND e.content_hash = m.hash
-       AND m.agent_id = ?
-       AND m.vitality >= ?`,
-  ).all(opts.providerId, agentId, minVitality) as Array<{ provider_id: string; vector: Buffer; content_hash: string } & Memory>;
+     WHERE ${conditions.join(" AND ")}`,
+  ).all(...params) as Array<{ provider_id: string; vector: Buffer; content_hash: string } & Memory>;
 
   const scored = rows
     .map((row) => ({

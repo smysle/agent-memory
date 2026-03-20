@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { newId, now } from "../core/db.js";
 
-export type FeedbackSource = "recall" | "surface";
+export type FeedbackSource = "recall" | "surface" | "passive";
 
 export interface FeedbackEventInput {
   memory_id: string;
@@ -130,4 +130,62 @@ export function getFeedbackScore(
   agentId?: string,
 ): number {
   return getFeedbackSummary(db, memoryId, agentId).score;
+}
+
+/**
+ * Record passive feedback for multiple memories.
+ * 24h dedup: each memory can receive at most 3 passive feedbacks per 24h window.
+ * Uses batch query to avoid N+1.
+ */
+export function recordPassiveFeedback(
+  db: Database.Database,
+  memoryIds: string[],
+  agentId?: string,
+): number {
+  if (memoryIds.length === 0) return 0;
+
+  const effectiveAgentId = agentId ?? "default";
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  // Batch check: how many passive feedbacks each memory has in the last 24h
+  const placeholders = memoryIds.map(() => "?").join(",");
+  const recentCounts = new Map<string, number>();
+
+  try {
+    const rows = db.prepare(
+      `SELECT memory_id, COUNT(*) as c
+       FROM feedback_events
+       WHERE memory_id IN (${placeholders})
+         AND source = 'passive'
+         AND created_at > ?
+       GROUP BY memory_id`,
+    ).all(...memoryIds, cutoff) as Array<{ memory_id: string; c: number }>;
+
+    for (const row of rows) {
+      recentCounts.set(row.memory_id, row.c);
+    }
+  } catch {
+    // Table might not have source column in very old schemas
+  }
+
+  let recorded = 0;
+  const timestamp = new Date().toISOString();
+  const insert = db.prepare(
+    `INSERT INTO feedback_events (id, memory_id, source, useful, agent_id, event_type, value, created_at)
+     VALUES (?, ?, 'passive', 1, ?, 'passive:useful', 0.7, ?)`,
+  );
+
+  for (const memoryId of memoryIds) {
+    const count = recentCounts.get(memoryId) ?? 0;
+    if (count >= 3) continue;
+
+    try {
+      insert.run(newId(), memoryId, effectiveAgentId, timestamp);
+      recorded++;
+    } catch {
+      // Memory might not exist
+    }
+  }
+
+  return recorded;
 }
