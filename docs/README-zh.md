@@ -4,7 +4,7 @@
 
 **完整文档请参阅 [README.md](../README.md)（英文）**
 
-当前版本：**v5.0.2**
+当前版本：**v5.1.0**
 
 ---
 
@@ -32,6 +32,20 @@ v5 是重大特性版本，新增 6 项智能能力，全部向下兼容 v4：
 系统会强制将 `skip`（跳过）降级为 `update`（更新），防止状态变更被去重吞掉。
 
 例：旧记忆 "TODO: 修复 bug" → 新写入 "DONE: 修复 bug"，不会被当作重复跳过。
+
+## v5.1 新特性：淘汰归档 + 分层容量
+
+v5.1 引入两项记忆管理增强，让治理引擎更精细、更安全：
+
+| 特性 | 说明 |
+|------|------|
+| **淘汰归档（Archive on eviction）** | 治理阶段淘汰的记忆不再直接删除，而是移入 `memory_archive` 表。可随时列出、恢复或清除。Schema 升级至 v8。 |
+| **分层容量（Tiered capacity）** | 支持按记忆类型设置独立上限（identity / emotion / knowledge / event），全局 `MAX_MEMORIES` 变为兜底值。 |
+
+新增 MCP 工具 `archive`，支持三种操作：
+- `list` — 列出已归档记忆
+- `restore` — 从归档恢复到主表
+- `purge` — 永久清除归档记忆
 
 ## 核心概念
 
@@ -66,7 +80,7 @@ npx agent-memory reflect all
 npx agent-memory status
 ```
 
-## MCP 集成（11 个工具）
+## MCP 集成（12 个工具）
 
 ```json
 {
@@ -96,6 +110,7 @@ npx agent-memory status
 | `ingest` | 从 Markdown 文本提取结构化记忆 |
 | `reindex` | 重建 BM25 索引和（可选的）向量嵌入 |
 | `link` | **v5 新增** — 手动创建/删除记忆关联 |
+| `archive` | **v5.1 新增** — 列出/恢复/清除已归档记忆 |
 
 ## 环境变量
 
@@ -103,7 +118,11 @@ npx agent-memory status
 |------|--------|------|
 | `AGENT_MEMORY_DB` | `./agent-memory.db` | SQLite 数据库路径 |
 | `AGENT_MEMORY_AGENT_ID` | `default` | Agent 作用域 ID |
-| `AGENT_MEMORY_MAX_MEMORIES` | `200` | 治理引擎的记忆上限，超出时按 eviction score 淘汰 |
+| `AGENT_MEMORY_MAX_MEMORIES` | `350` | 治理引擎的全局记忆上限兜底值，当未设置分层限制时生效 |
+| `AGENT_MEMORY_MAX_IDENTITY` | _(无限)_ | `identity` 类型记忆上限，默认不限制 |
+| `AGENT_MEMORY_MAX_EMOTION` | `50` | `emotion` 类型记忆上限 |
+| `AGENT_MEMORY_MAX_KNOWLEDGE` | `250` | `knowledge` 类型记忆上限 |
+| `AGENT_MEMORY_MAX_EVENT` | `50` | `event` 类型记忆上限 |
 | `AGENT_MEMORY_AUTO_INGEST` | `1` | 是否启用 auto-ingest 文件监听 |
 | `AGENT_MEMORY_AUTO_INGEST_DAILY` | `0` | 是否监听日记文件（YYYY-MM-DD.md），默认只监听 MEMORY.md |
 | `AGENT_MEMORY_EMBEDDING_PROVIDER` | _(空)_ | 嵌入提供者（`openai-compatible` / `gemini` / `local-http`） |

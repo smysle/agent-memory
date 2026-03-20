@@ -113,6 +113,40 @@ TODO to DONE). Conflicts are reported without blocking writes.
 `recall` automatically logs positive feedback for top hits. The `tidy` phase
 detects stale content patterns and accelerates decay for outdated memories.
 
+### Archive on Eviction (v5.1)
+
+When `reflect govern` evicts memories, they are moved to the `memory_archive`
+table instead of being permanently deleted. Use the `archive` MCP tool to:
+
+- `list` — browse archived memories with optional type/query filters
+- `restore` — bring an archived memory back to the active store
+- `purge` — permanently remove archived memories
+
+This is especially useful in OpenClaw cron pipelines where governance runs
+automatically — accidentally evicted memories can be recovered.
+
+### Tiered Capacity (v5.1)
+
+Memory limits can now be set per type in your MCP env block:
+
+```json
+{
+  "env": {
+    "AGENT_MEMORY_MAX_IDENTITY": "",
+    "AGENT_MEMORY_MAX_EMOTION": "50",
+    "AGENT_MEMORY_MAX_KNOWLEDGE": "250",
+    "AGENT_MEMORY_MAX_EVENT": "50",
+    "AGENT_MEMORY_MAX_MEMORIES": "350"
+  }
+}
+```
+
+- `identity` has no default limit (core identity should never be evicted)
+- `emotion` defaults to 50 (keeps recent emotional context)
+- `knowledge` defaults to 250 (the largest tier)
+- `event` defaults to 50 (temporal events age naturally)
+- `AGENT_MEMORY_MAX_MEMORIES` (350) is the global fallback
+
 ## Example directory layout
 
 ```text

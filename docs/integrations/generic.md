@@ -168,6 +168,7 @@ MCP is a good fit when your host already has a tool abstraction.
 - `reindex`
 - `surface` — context-aware surfacing (supports `related`, `after`, `before`, `recency_boost`)
 - `link` — manually create or remove associations between memories
+- `archive` — list, restore, or purge evicted memories from the archive
 
 See [examples/mcp-stdio](../../examples/mcp-stdio) for a minimal example.
 
@@ -315,6 +316,27 @@ are exempt.
 
 Memories can carry `source_session`, `source_context`, and `observed_at`
 metadata to track where and when they originated.
+
+### Archive on Eviction (v5.1)
+
+When `reflect govern` evicts memories that exceed capacity, they are moved to
+the `memory_archive` table instead of being permanently deleted. Use the
+`archive` tool to list, restore, or purge archived memories.
+
+### Tiered Capacity (v5.1)
+
+Memory limits can now be set per type:
+
+```bash
+export AGENT_MEMORY_MAX_IDENTITY=      # unlimited by default
+export AGENT_MEMORY_MAX_EMOTION=50
+export AGENT_MEMORY_MAX_KNOWLEDGE=250
+export AGENT_MEMORY_MAX_EVENT=50
+export AGENT_MEMORY_MAX_MEMORIES=350   # global fallback
+```
+
+Per-type limits take precedence. `AGENT_MEMORY_MAX_MEMORIES` serves as the
+global fallback when no type-specific limit is configured.
 
 ## Common mistakes
 

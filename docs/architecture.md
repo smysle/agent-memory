@@ -38,6 +38,7 @@ flowchart LR
         EMB[(embeddings, optional)]
         JOB[(maintenance_jobs)]
         FB[(feedback_events)]
+        ARC[(memory_archive)]
     end
 
     CLI --> REM
@@ -66,6 +67,7 @@ flowchart LR
     LIFE --> EMB
     LIFE --> JOB
     LIFE --> FB
+    LIFE --> ARC
 ```
 
 ## Write path
@@ -181,10 +183,22 @@ flowchart TD
 
 - **decay** — lower vitality over time with type-aware priors
 - **tidy** — consolidate or normalize where appropriate
-- **govern** — enforce quotas and clean low-value memory over time
+- **govern** — enforce quotas and clean low-value memory over time; evicted
+  memories are moved to the **archive** table (v5.1) instead of being
+  permanently deleted
 
 In v4, reflect jobs are tracked through **maintenance checkpoints**, which makes
 longer jobs more observable and more recovery-friendly.
+
+### Archive (v5.1)
+
+The archive provides a safety net for the governance process:
+
+- Evicted memories are moved to `memory_archive` rather than deleted
+- The `archive` tool supports `list`, `restore`, and `purge` operations
+- Archived memories retain all metadata and can be restored to the active store
+- Per-type capacity limits (`identity`, `emotion`, `knowledge`, `event`) give
+  fine-grained control over what gets evicted and when
 
 ### Reindex
 

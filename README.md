@@ -10,7 +10,7 @@
   <a href="https://www.npmjs.com/package/@smyslenny/agent-memory"><img src="https://img.shields.io/npm/v/@smyslenny/agent-memory" alt="npm" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-%E2%89%A518-green.svg" alt="Node.js" /></a>
-  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-11_tools-orange.svg" alt="MCP" /></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-12_tools-orange.svg" alt="MCP" /></a>
 </p>
 
 **English** | [简体中文说明](docs/README-zh.md)
@@ -22,7 +22,7 @@ AgentMemory is a SQLite-first memory layer for AI agents. It lets an agent:
 - **maintain** them over time with `reflect`, `reindex`, and feedback signals
 - **integrate** through **CLI**, **MCP stdio**, or **HTTP/SSE**
 
-Current release: **`5.0.2`**.
+Current release: **`5.1.0`**.
 
 Without an embedding provider, AgentMemory still works in **BM25-only mode**.
 With one configured, it adds **hybrid recall** and **semantic dedup**.
@@ -52,6 +52,8 @@ Core building blocks:
 - **Passive feedback** that records usage signals automatically
 - **Semantic decay** that detects stale content beyond pure time-based Ebbinghaus
 - **Memory provenance** for tracking where and when each memory originated
+- **Archive on eviction** that preserves evicted memories for later restore
+- **Tiered capacity** with per-type memory limits
 - **Lifecycle jobs**: `reflect`, `reindex`, job checkpoints, feedback signals
 - **Three transport modes**: CLI, MCP stdio, HTTP/SSE
 
@@ -210,6 +212,7 @@ Available MCP tools:
 - `reindex` — rebuild BM25 index and optional embeddings
 - `surface` — context-aware readonly surfacing (supports `related`, `after`, `before`, `recency_boost`)
 - `link` — manually create or remove associations between memories
+- `archive` — list, restore, or purge evicted memories from the archive
 
 ### C. HTTP API
 
@@ -301,7 +304,11 @@ service. If no provider is configured, AgentMemory falls back to BM25-only.
 | --- | --- | --- |
 | `AGENT_MEMORY_DB` | `./agent-memory.db` | SQLite database path |
 | `AGENT_MEMORY_AGENT_ID` | `default` | Agent scope for multi-agent setups |
-| `AGENT_MEMORY_MAX_MEMORIES` | `200` | Maximum memories retained during `reflect govern` |
+| `AGENT_MEMORY_MAX_MEMORIES` | `350` | Global fallback for maximum memories retained during `reflect govern`. Applied when no per-type limit is set. |
+| `AGENT_MEMORY_MAX_IDENTITY` | _(unlimited)_ | Maximum `identity` memories retained. No limit by default. |
+| `AGENT_MEMORY_MAX_EMOTION` | `50` | Maximum `emotion` memories retained. |
+| `AGENT_MEMORY_MAX_KNOWLEDGE` | `250` | Maximum `knowledge` memories retained. |
+| `AGENT_MEMORY_MAX_EVENT` | `50` | Maximum `event` memories retained. |
 | `AGENT_MEMORY_AUTO_INGEST` | `1` | Set to `0` to disable the auto-ingest file watcher |
 | `AGENT_MEMORY_AUTO_INGEST_DAILY` | _(unset)_ | Set to `1` to include daily log files (`YYYY-MM-DD.md`) in auto-ingest. By default, only `MEMORY.md` is watched. |
 | `AGENT_MEMORY_WORKSPACE` | `~/.openclaw/workspace` | Workspace directory for the auto-ingest watcher |
