@@ -104,52 +104,86 @@ OpenClaw 插件通过 `plugin.on(hookName, handler)` 注册 hook handler。adapt
 
 ```typescript
 // src/plugin.ts
-import type { PluginRuntime } from "@smyslenny/openclaw-plugin-types"; // 或直接引用 OC 类型
+// 注意：OC Plugin 不通过 plugin.on() 注册——它通过 OpenClawPlugin 的 hooks 数组声明。
+// 每个 hook 是 { hookName, handler, priority? } 对象。
+
+import type {
+  PluginHookBeforePromptBuildEvent,
+  PluginHookBeforePromptBuildResult,
+  PluginHookSessionStartEvent,
+  PluginHookSessionContext,
+  PluginHookAgentContext,
+  PluginHookBeforeResetEvent,
+} from "openclaw/plugins/types"; // OC 导出的类型
+
+import type { OpenClawPlugin } from "openclaw/plugins/types";
 import { BootManager } from "./boot-manager.js";
 import { SurfaceManager } from "./surface-manager.js";
-import { resolveConfig } from "./config.js";
+import { resolveConfig, type AdapterConfig } from "./config.js";
 
-export function registerPlugin(plugin: PluginRuntime): void {
-  const config = resolveConfig(plugin.config);
-  if (!config.enabled) return;
+export function createPlugin(rawConfig?: Record<string, unknown>): OpenClawPlugin {
+  const config = resolveConfig(rawConfig);
+  if (!config.enabled) return { hooks: [] };
 
   const bootManager = new BootManager(config);
   const surfaceManager = new SurfaceManager(config);
 
+  const hooks = [];
+
   // Phase 1: 读路径
   if (config.autoBoot) {
-    plugin.on("session_start", async (event, ctx) => {
-      await bootManager.onSessionStart(event, ctx);
+    hooks.push({
+      hookName: "session_start" as const,
+      handler: async (
+        event: PluginHookSessionStartEvent,
+        ctx: PluginHookSessionContext
+      ) => {
+        await bootManager.onSessionStart(event, ctx);
+      },
     });
   }
 
   if (config.autoSurface) {
-    plugin.on("before_prompt_build", async (event, ctx) => {
-      return surfaceManager.onBeforePromptBuild(event, ctx);
+    hooks.push({
+      hookName: "before_prompt_build" as const,
+      handler: async (
+        event: PluginHookBeforePromptBuildEvent,
+        ctx: PluginHookAgentContext
+      ): Promise<PluginHookBeforePromptBuildResult | void> => {
+        return surfaceManager.onBeforePromptBuild(event, ctx);
+      },
     });
   }
 
-  // Phase 2（未来）: 写路径
-  // if (config.autoRemember) {
-  //   plugin.on("agent_end", async (event, ctx) => { ... });
-  // }
-
   // Session 边界清理
-  plugin.on("before_reset", async (_event, ctx) => {
-    bootManager.clearSession(ctx.sessionId);
-    surfaceManager.clearSession(ctx.sessionId);
+  hooks.push({
+    hookName: "before_reset" as const,
+    handler: async (
+      _event: PluginHookBeforeResetEvent,
+      ctx: PluginHookAgentContext
+    ) => {
+      if (ctx.sessionId) {
+        bootManager.clearSession(ctx.sessionId);
+        surfaceManager.clearSession(ctx.sessionId);
+      }
+    },
   });
+
+  // Phase 2（未来）: 写路径
+  // hooks.push({ hookName: "agent_end", handler: ... });
+
+  return { hooks };
 }
 ```
 
 ### 4.4 BootManager 详细设计
 
-**触发时机**: `session_start` hook
+**触发时机**: `session_start` hook（void hook，不返回值）
 
 **职责**:
 1. 调用 `boot()` 或 `warmBoot()` 加载 identity / pinned 记忆
 2. 将 boot 结果缓存到 session 级状态（同一 session 不重复 boot）
-3. 生成 narrative 格式的启动记忆块
+3. boot narrative 通过 `before_prompt_build` hook 中的 SurfaceManager 注入到 prompt（因为 `session_start` 是 void hook，无法直接返回 prompt 内容）
 
 ```typescript
 // src/boot-manager.ts
@@ -161,11 +195,13 @@ export class BootManager {
 
   async onSessionStart(
     event: { sessionId: string; sessionKey?: string; resumedFrom?: string },
-    ctx: { agentId?: string; sessionId: string; workspaceDir?: string }
+    ctx: { agentId?: string; sessionId: string; sessionKey?: string }
+    // 注意：PluginHookSessionContext 不含 workspaceDir
+    // DB 路径通过配置或环境变量解析，不依赖 hook context
   ): Promise<void> {
     if (this.sessionBootCache.has(ctx.sessionId)) return; // 已 boot
 
-    const dbPath = this.resolveDbPath(ctx.workspaceDir);
+    const dbPath = this.resolveDbPath();
     const db = openDatabase(dbPath);
 
     try {
@@ -188,13 +224,12 @@ export class BootManager {
     this.sessionBootCache.delete(sessionId);
   }
 
-  private resolveDbPath(workspaceDir?: string): string {
-    // 优先使用 workspaceDir 下的 agent-memory.db
+  private resolveDbPath(): string {
+    // 优先使用插件 config 中显式指定的 dbPath
     // 回退到环境变量 AGENT_MEMORY_DB_PATH
     // 再回退到 ~/.agent-memory/memory.db
-    if (workspaceDir) {
-      return `${workspaceDir}/agent-memory.db`;
-    }
+    // 注意：session_start hook 的 SessionContext 不含 workspaceDir
+    if (this.config.dbPath) return this.config.dbPath;
     return process.env.AGENT_MEMORY_DB_PATH || `${process.env.HOME}/.agent-memory/memory.db`;
   }
 }
@@ -207,7 +242,7 @@ export class BootManager {
 **职责**:
 1. 从 hook event 提取 query context（prompt + messages 的 user 消息）
 2. 调用 `surfaceMemories()` 检索相关记忆
-3. 格式化为 prompt block，通过 `appendSystem` 返回注入
+3. 格式化为 prompt block，通过 `prependContext`（每次注入，不缓存）或 `appendSystemContext`（静态，可被 provider 缓存）返回注入
 4. session 内去重：同一 session 已注入的记忆 ID 不重复注入
 
 ```typescript
@@ -261,7 +296,14 @@ export class SurfaceManager {
       // 格式化并截断
       const block = formatMemoryBlock(newResults, this.config.surfaceMaxChars);
 
-      return { appendSystem: block };
+      // boot narrative 是静态的，用 appendSystemContext（可被 provider 缓存）
+      // surface 结果每次不同，用 prependContext（每次注入）
+      const bootNarrative = this.bootManagerRef?.getBootNarrative(ctx.sessionId ?? "");
+      
+      return {
+        prependContext: block,
+        ...(bootNarrative ? { appendSystemContext: bootNarrative } : {}),
+      };
     } finally {
       db.close();
     }
@@ -310,6 +352,8 @@ export class SurfaceManager {
   }
 
   private resolveDbPath(workspaceDir?: string): string {
+    // before_prompt_build 的 AgentContext 有 workspaceDir
+    if (this.config.dbPath) return this.config.dbPath;
     if (workspaceDir) return `${workspaceDir}/agent-memory.db`;
     return process.env.AGENT_MEMORY_DB_PATH || `${process.env.HOME}/.agent-memory/memory.db`;
   }
@@ -358,6 +402,8 @@ export interface AdapterConfig {
   surfaceLimit: number;
   /** 注入 prompt 的最大字符数 */
   surfaceMaxChars: number;
+  /** 显式指定 DB 路径（可选，覆盖自动解析） */
+  dbPath?: string;
 }
 
 export const DEFAULT_CONFIG: AdapterConfig = {
@@ -409,9 +455,11 @@ export function resolveConfig(raw?: Record<string, unknown>): AdapterConfig {
 
 优先级（从高到低）：
 1. 插件 config 中显式指定的 `dbPath`
-2. `{workspaceDir}/agent-memory.db`（OC hook context 提供的 workspaceDir）
+2. `{workspaceDir}/agent-memory.db`（仅 `before_prompt_build` 等 AgentContext hook 提供 workspaceDir）
 3. 环境变量 `AGENT_MEMORY_DB_PATH`
 4. `~/.agent-memory/memory.db`（默认）
+
+**注意**：`session_start` hook 使用 `PluginHookSessionContext`，不含 `workspaceDir`。因此 BootManager 只能依赖 config.dbPath 或环境变量。`before_prompt_build` 使用 `PluginHookAgentContext`，包含 `workspaceDir`，SurfaceManager 可以利用。
 
 ### 4.10 Session 去重策略
 
@@ -471,6 +519,10 @@ adapter 是独立插件，回滚方式：
 | 2026-03-21 | 跳过 injectMode 抽象 | OC before_prompt_build 已定义注入机制 |
 | 2026-03-21 | 配置精简为 6 项 | 第一版避免过度设计 |
 | 2026-03-21 | 独立仓库发布 | 保持 agent-memory core 仓库干净 |
+| 2026-03-21 | before_prompt_build 返回 prependContext 而非 appendSystem | 源码验证：OC 实际字段为 prependContext / appendSystemContext，无 appendSystem |
+| 2026-03-21 | session_start 是 void hook，boot narrative 通过 before_prompt_build 注入 | 源码验证：PluginHookSessionStartEvent handler 返回 void |
+| 2026-03-21 | PluginHookSessionContext 不含 workspaceDir，BootManager 用 config.dbPath | 源码验证：SessionContext 只有 agentId / sessionId / sessionKey |
+| 2026-03-21 | 新增 dbPath 配置项 | session_start 无法获取 workspaceDir，需要显式配置 DB 路径作为后备 |
 
 ---
 
