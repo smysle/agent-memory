@@ -81,12 +81,11 @@ agent-memory-openclaw/
 ├── tsconfig.json
 ├── tsup.config.ts
 ├── src/
-│   ├── index.ts              # 插件入口，导出 OpenClawPlugin
-│   ├── plugin.ts             # 插件注册逻辑（on hook handlers）
+│   ├── index.ts              # 插件入口，导出 OpenClawPluginDefinition
 │   ├── boot-manager.ts       # session_start → boot() 编排
 │   ├── surface-manager.ts    # before_prompt_build → surface() 编排
 │   ├── config.ts             # 配置解析与默认值
-│   ├── session-state.ts      # session 级去重与状态管理
+│   ├── session-state.ts      # session 级去重与状态管理（含 GC）
 │   ├── format.ts             # surface 结果 → prompt block 格式化
 │   └── types.ts              # 类型定义
 ├── tests/
@@ -100,80 +99,58 @@ agent-memory-openclaw/
 
 ### 4.3 OpenClaw 插件注册
 
-OpenClaw 插件通过 `plugin.on(hookName, handler)` 注册 hook handler。adapter 的入口：
+OpenClaw 插件通过导出 `OpenClawPluginDefinition`，在 `register(api)` 回调中使用 `api.on(hookName, handler)` 注册 typed hook handler：
 
 ```typescript
-// src/plugin.ts
-// 注意：OC Plugin 不通过 plugin.on() 注册——它通过 OpenClawPlugin 的 hooks 数组声明。
-// 每个 hook 是 { hookName, handler, priority? } 对象。
-
-import type {
-  PluginHookBeforePromptBuildEvent,
-  PluginHookBeforePromptBuildResult,
-  PluginHookSessionStartEvent,
-  PluginHookSessionContext,
-  PluginHookAgentContext,
-  PluginHookBeforeResetEvent,
-} from "openclaw/plugins/types"; // OC 导出的类型
-
-import type { OpenClawPlugin } from "openclaw/plugins/types";
+// src/index.ts — 插件入口
+import type { OpenClawPluginDefinition } from "openclaw"; // OC 导出的类型
 import { BootManager } from "./boot-manager.js";
 import { SurfaceManager } from "./surface-manager.js";
-import { resolveConfig, type AdapterConfig } from "./config.js";
+import { resolveConfig } from "./config.js";
 
-export function createPlugin(rawConfig?: Record<string, unknown>): OpenClawPlugin {
-  const config = resolveConfig(rawConfig);
-  if (!config.enabled) return { hooks: [] };
+const plugin: OpenClawPluginDefinition = {
+  name: "agent-memory-openclaw",
+  description: "AgentMemory native adapter for OpenClaw",
+  version: "0.1.0",
 
-  const bootManager = new BootManager(config);
-  const surfaceManager = new SurfaceManager(config);
+  register(api) {
+    const config = resolveConfig(api.pluginConfig);
+    if (!config.enabled) return;
 
-  const hooks = [];
+    const bootManager = new BootManager(config);
+    const surfaceManager = new SurfaceManager(config, bootManager);
 
-  // Phase 1: 读路径
-  if (config.autoBoot) {
-    hooks.push({
-      hookName: "session_start" as const,
-      handler: async (
-        event: PluginHookSessionStartEvent,
-        ctx: PluginHookSessionContext
-      ) => {
+    // Phase 1: 读路径
+    if (config.autoBoot) {
+      api.on("session_start", async (event, ctx) => {
         await bootManager.onSessionStart(event, ctx);
-      },
-    });
-  }
+      });
+    }
 
-  if (config.autoSurface) {
-    hooks.push({
-      hookName: "before_prompt_build" as const,
-      handler: async (
-        event: PluginHookBeforePromptBuildEvent,
-        ctx: PluginHookAgentContext
-      ): Promise<PluginHookBeforePromptBuildResult | void> => {
+    if (config.autoSurface) {
+      api.on("before_prompt_build", async (event, ctx) => {
         return surfaceManager.onBeforePromptBuild(event, ctx);
-      },
-    });
-  }
+      });
+    }
 
-  // Session 边界清理
-  hooks.push({
-    hookName: "before_reset" as const,
-    handler: async (
-      _event: PluginHookBeforeResetEvent,
-      ctx: PluginHookAgentContext
-    ) => {
+    // Session 边界清理
+    api.on("before_reset", async (_event, ctx) => {
       if (ctx.sessionId) {
         bootManager.clearSession(ctx.sessionId);
         surfaceManager.clearSession(ctx.sessionId);
       }
-    },
-  });
+    });
 
-  // Phase 2（未来）: 写路径
-  // hooks.push({ hookName: "agent_end", handler: ... });
+    // Phase 2（未来）: 写路径
+    // if (config.autoRemember) {
+    //   api.on("agent_end", async (event, ctx) => { ... });
+    // }
 
-  return { hooks };
-}
+    api.logger.info("AgentMemory adapter registered");
+  },
+};
+
+export default plugin;
 ```
 
 ### 4.4 BootManager 详细设计
@@ -523,6 +500,7 @@ adapter 是独立插件，回滚方式：
 | 2026-03-21 | session_start 是 void hook，boot narrative 通过 before_prompt_build 注入 | 源码验证：PluginHookSessionStartEvent handler 返回 void |
 | 2026-03-21 | PluginHookSessionContext 不含 workspaceDir，BootManager 用 config.dbPath | 源码验证：SessionContext 只有 agentId / sessionId / sessionKey |
 | 2026-03-21 | 新增 dbPath 配置项 | session_start 无法获取 workspaceDir，需要显式配置 DB 路径作为后备 |
+| 2026-03-21 | 插件注册改回 api.on() | 源码验证：OpenClawPluginApi.on() 是官方注册 typed hook 的方式（registry.ts 确认），不是 hooks 数组 |
 
 ---
 
