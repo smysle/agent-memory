@@ -1,6 +1,6 @@
 # DD-0001: OpenClaw Native Adapter Plugin
 
-**Status:** Draft
+**Status:** Implemented
 **Author:** Noah
 **Date:** 2026-03-21
 **Repo:** /home/darling/projects/agent-memory
