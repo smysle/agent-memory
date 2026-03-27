@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { listMemories, type Memory, type MemoryType } from "../core/memory.js";
 import type { EmbeddingProvider } from "../search/embedding.js";
 import { priorityPrior, fetchRelatedLinks } from "../search/hybrid.js";
-import { getEmbeddingProviderFromEnv } from "../search/providers.js";
+import { getEmbeddingProviderFromEnv, getEmbeddingProviderManager } from "../search/providers.js";
 import { searchBM25 } from "../search/bm25.js";
 import { tokenize } from "../search/tokenizer.js";
 import { searchByVector } from "../search/vector.js";
@@ -230,7 +230,10 @@ export async function surfaceMemories(
   const limit = Math.max(1, Math.min(input.limit ?? 5, 20));
   const lexicalWindow = Math.max(24, limit * 6);
   const minVitality = input.min_vitality ?? 0.05;
-  const provider = input.provider === undefined ? getEmbeddingProviderFromEnv() : input.provider;
+  const providerManager = input.provider === undefined ? getEmbeddingProviderManager() : null;
+  const provider = input.provider === undefined
+    ? providerManager?.getActiveProvider() ?? getEmbeddingProviderFromEnv()
+    : input.provider;
   const signals = new Map<string, CandidateSignal>();
 
   const trimmedQuery = input.query?.trim();
@@ -284,10 +287,13 @@ export async function surfaceMemories(
   const semanticQuery = [trimmedQuery, trimmedTask, ...recentTurns].filter(Boolean).join("\n").trim();
   if (provider && semanticQuery) {
     try {
-      const [queryVector] = await provider.embed([semanticQuery]);
+      const result = providerManager
+        ? await providerManager.embedWithFailover([semanticQuery])
+        : { provider, vectors: await provider.embed([semanticQuery]) };
+      const [queryVector] = result.vectors;
       if (queryVector) {
         const vectorRows = searchByVector(db, queryVector, {
-          providerId: provider.id,
+          providerId: result.provider.id,
           agent_id: agentId,
           limit: lexicalWindow,
           min_vitality: minVitality,

@@ -2,7 +2,7 @@
 import type Database from "better-sqlite3";
 import { recallMemories, type HybridRecallResult } from "../search/hybrid.js";
 import type { EmbeddingProvider } from "../search/embedding.js";
-import { getEmbeddingProviderFromEnv } from "../search/providers.js";
+import { getEmbeddingProviderFromEnv, getEmbeddingProviderManager } from "../search/providers.js";
 import { tokenize } from "../search/tokenizer.js";
 import { parseUri, getPathByUri } from "./path.js";
 import { buildMergePlan, type MergePlan } from "./merge.js";
@@ -208,7 +208,10 @@ function scoreCandidate(input: GuardInput, candidate: HybridRecallResult, candid
 }
 
 async function recallCandidates(db: Database.Database, input: GuardInput, agentId: string): Promise<GuardCandidate[]> {
-  const provider = input.provider === undefined ? getEmbeddingProviderFromEnv() : input.provider;
+  const providerManager = input.provider === undefined ? getEmbeddingProviderManager() : null;
+  const provider = input.provider === undefined
+    ? providerManager?.getActiveProvider() ?? getEmbeddingProviderFromEnv()
+    : input.provider;
   const response = await recallMemories(db, input.content, {
     agent_id: agentId,
     limit: Math.max(6, input.candidateLimit ?? 8),

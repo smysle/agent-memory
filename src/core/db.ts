@@ -3,6 +3,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 
 export const SCHEMA_VERSION = 8;
+const DATABASE_PATHS = new WeakMap<Database.Database, string>();
 
 const SCHEMA_SQL = `
 -- Memory entries
@@ -163,6 +164,7 @@ export function isCountRow(row: unknown): row is { c: number } {
 
 export function openDatabase(opts: DbOptions): Database.Database {
   const db = new Database(opts.path);
+  DATABASE_PATHS.set(db, opts.path);
 
   // Enable WAL mode for better concurrent read performance
   if (opts.walMode !== false) {
@@ -190,6 +192,14 @@ export function openDatabase(opts: DbOptions): Database.Database {
   ensureFeedbackEventSchema(db);
 
   return db;
+}
+
+export function getDatabasePath(db: Database.Database): string | null {
+  const registered = DATABASE_PATHS.get(db);
+  if (registered) return registered;
+
+  const candidate = (db as unknown as { name?: unknown }).name;
+  return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
 }
 
 export function now(): string {

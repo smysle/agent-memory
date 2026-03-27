@@ -3,8 +3,8 @@ import { createHash } from "crypto";
 import type Database from "better-sqlite3";
 import { newId, now } from "./db.js";
 import { tokenizeForIndex } from "../search/tokenizer.js";
-import { getConfiguredEmbeddingProviderId } from "../search/providers.js";
-import { markAllEmbeddingsPending, markMemoryEmbeddingPending } from "../search/vector.js";
+import { getConfiguredEmbeddingProviderIds } from "../search/providers.js";
+import { deleteEmbeddingRecords, markAllEmbeddingsPending, markMemoryEmbeddingPending } from "../search/vector.js";
 
 export type MemoryType = "identity" | "emotion" | "knowledge" | "event";
 export type Priority = 0 | 1 | 2 | 3;
@@ -76,13 +76,6 @@ const PRIORITY_STABILITY: Record<Priority, number> = {
   3: 14, // P3: 14-day half-life
 };
 
-function resolveEmbeddingProviderId(explicitProviderId?: string | null): string | null {
-  if (explicitProviderId !== undefined) {
-    return explicitProviderId;
-  }
-  return getConfiguredEmbeddingProviderId();
-}
-
 function markEmbeddingDirtyIfNeeded(
   db: Database.Database,
   memoryId: string,
@@ -94,6 +87,21 @@ function markEmbeddingDirtyIfNeeded(
     markMemoryEmbeddingPending(db, memoryId, providerId, hash);
   } catch {
     // Older schemas (for migration tests) may not have the embeddings table yet.
+  }
+}
+
+function markEmbeddingsDirtyForConfiguredProviders(
+  db: Database.Database,
+  memoryId: string,
+  hash: string,
+  explicitProviderId?: string | null,
+): void {
+  const providerIds = explicitProviderId !== undefined
+    ? (explicitProviderId ? [explicitProviderId] : [])
+    : getConfiguredEmbeddingProviderIds();
+
+  for (const providerId of providerIds) {
+    markEmbeddingDirtyIfNeeded(db, memoryId, hash, providerId);
   }
 }
 
@@ -141,7 +149,7 @@ export function createMemory(db: Database.Database, input: CreateMemoryInput): M
   // Sync to FTS index (tokenized for CJK support)
   db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(id, tokenizeForIndex(input.content));
 
-  markEmbeddingDirtyIfNeeded(db, id, hash, resolveEmbeddingProviderId(input.embedding_provider_id));
+  markEmbeddingsDirtyForConfiguredProviders(db, id, hash, input.embedding_provider_id);
 
   return getMemory(db, id)!;
 }
@@ -213,7 +221,7 @@ export function updateMemory(
       } catch {
         // Older schemas (for migration tests) may not have the embeddings table yet.
       }
-      markEmbeddingDirtyIfNeeded(db, id, nextHash, resolveEmbeddingProviderId(input.embedding_provider_id));
+      markEmbeddingsDirtyForConfiguredProviders(db, id, nextHash, input.embedding_provider_id);
     }
   }
 
@@ -223,8 +231,7 @@ export function updateMemory(
 export function deleteMemory(db: Database.Database, id: string): boolean {
   // FTS cleanup
   db.prepare("DELETE FROM memories_fts WHERE id = ?").run(id);
-  // Embedding cleanup (best-effort for older schemas)
-  try { db.prepare("DELETE FROM embeddings WHERE memory_id = ?").run(id); } catch {}
+  deleteEmbeddingRecords(db, id);
   const result = db.prepare("DELETE FROM memories WHERE id = ?").run(id);
   return result.changes > 0;
 }
@@ -325,8 +332,7 @@ export function restoreMemory(db: Database.Database, id: string): Memory | null 
 
   // Mark embedding as pending
   if (archived.hash) {
-    const providerId = getConfiguredEmbeddingProviderId();
-    if (providerId) {
+    for (const providerId of getConfiguredEmbeddingProviderIds()) {
       try {
         markMemoryEmbeddingPending(db, archived.id, providerId, archived.hash);
       } catch {

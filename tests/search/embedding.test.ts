@@ -5,14 +5,18 @@ import {
   createOpenAICompatibleEmbeddingProvider,
 } from "../../src/search/embedding.js";
 import {
+  clearRuntimeEmbeddingProviderConfigs,
   getEmbeddingProvider,
+  getEmbeddingProviderManager,
   getEmbeddingProviderFromEnv,
   healthcheckEmbeddingProvider,
+  setRuntimeEmbeddingProviderConfigs,
 } from "../../src/search/providers.js";
 
 describe("embedding providers", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    clearRuntimeEmbeddingProviderConfigs();
   });
 
   it("calls openai-compatible embeddings endpoint with batch input", async () => {
@@ -137,5 +141,28 @@ describe("embedding providers", () => {
     expect(url).toContain("my-proxy.example.com");
     expect(url).toContain("/v1beta/models/gemini-embedding-2-preview:batchEmbedContents");
     expect(url).not.toContain("generativelanguage.googleapis.com");
+  });
+
+  it("prefers runtime/plugin embedding configs over env-only discovery for multi-provider routing", () => {
+    setRuntimeEmbeddingProviderConfigs([
+      {
+        provider: "local-http",
+        baseUrl: "http://127.0.0.1:11434",
+        model: "nomic-embed-text",
+        dimension: 768,
+      },
+      {
+        provider: "gemini",
+        model: "gemini-embedding-2-preview",
+        dimension: 3072,
+        apiKey: "runtime-gemini-key",
+      },
+    ]);
+
+    const manager = getEmbeddingProviderManager();
+    expect(manager).not.toBeNull();
+    expect(manager!.listProviders()).toHaveLength(2);
+    expect(manager!.getPrimaryProvider()?.model).toBe("nomic-embed-text");
+    expect(getEmbeddingProviderFromEnv({})).toBeNull();
   });
 });
