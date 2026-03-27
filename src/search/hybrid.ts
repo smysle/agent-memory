@@ -3,10 +3,11 @@ import type { Memory } from "../core/memory.js";
 import { recordAccess } from "../core/memory.js";
 import { searchBM25, rebuildBm25Index, type SearchResult } from "./bm25.js";
 import type { EmbeddingProvider } from "./embedding.js";
-import { getEmbeddingProviderFromEnv } from "./providers.js";
+import { getEmbeddingProviderFromEnv, getEmbeddingProviderManager } from "./providers.js";
 import {
   markEmbeddingFailed,
   markMemoryEmbeddingPending,
+  resetVectorSidecar,
   searchByVector,
   type VectorSearchResult,
   upsertReadyEmbedding,
@@ -54,6 +55,7 @@ export interface ReindexOptions {
 export interface ReindexEmbeddingsResult {
   enabled: boolean;
   providerId: string | null;
+  providerIds?: string[];
   scanned: number;
   pending: number;
   embedded: number;
@@ -169,23 +171,32 @@ async function searchVectorBranch(
   query: string,
   opts: {
     provider: EmbeddingProvider;
+    manager?: ReturnType<typeof getEmbeddingProviderManager> | null;
     agent_id: string;
     limit: number;
     min_vitality: number;
     after?: string;
     before?: string;
   },
-): Promise<VectorSearchResult[]> {
-  const [queryVector] = await opts.provider.embed([query]);
-  if (!queryVector) return [];
-  return searchByVector(db, queryVector, {
-    providerId: opts.provider.id,
-    agent_id: opts.agent_id,
-    limit: opts.limit,
-    min_vitality: opts.min_vitality,
-    after: opts.after,
-    before: opts.before,
-  });
+): Promise<{ providerId: string; results: VectorSearchResult[] }> {
+  const result = opts.manager
+    ? await opts.manager.embedWithFailover([query])
+    : { provider: opts.provider, vectors: await opts.provider.embed([query]) };
+  const [queryVector] = result.vectors;
+  if (!queryVector) {
+    return { providerId: result.provider.id, results: [] };
+  }
+  return {
+    providerId: result.provider.id,
+    results: searchByVector(db, queryVector, {
+      providerId: result.provider.id,
+      agent_id: opts.agent_id,
+      limit: opts.limit,
+      min_vitality: opts.min_vitality,
+      after: opts.after,
+      before: opts.before,
+    }),
+  };
 }
 
 export interface RelatedLink {
@@ -306,7 +317,8 @@ export async function recallMemories(
   const minVitality = opts?.min_vitality ?? 0;
   const lexicalLimit = opts?.lexicalLimit ?? Math.max(limit * 2, limit);
   const vectorLimit = opts?.vectorLimit ?? Math.max(limit * 2, limit);
-  const provider = opts?.provider === undefined ? getEmbeddingProviderFromEnv() : opts.provider;
+  const providerManager = opts?.provider === undefined ? getEmbeddingProviderManager() : null;
+  const provider = opts?.provider === undefined ? providerManager?.getActiveProvider() ?? null : opts.provider;
   const recencyBoost = opts?.recency_boost;
   const after = opts?.after;
   const before = opts?.before;
@@ -320,16 +332,20 @@ export async function recallMemories(
   });
 
   let vector: VectorSearchResult[] = [];
+  let vectorProviderId: string | null = provider?.id ?? null;
   if (provider) {
     try {
-      vector = await searchVectorBranch(db, query, {
+      const vectorBranch = await searchVectorBranch(db, query, {
         provider,
+        manager: providerManager,
         agent_id: agentId,
         limit: vectorLimit,
         min_vitality: minVitality,
         after,
         before,
       });
+      vector = vectorBranch.results;
+      vectorProviderId = vectorBranch.providerId;
     } catch {
       vector = [];
     }
@@ -361,7 +377,7 @@ export async function recallMemories(
 
   return {
     mode,
-    providerId: provider?.id ?? null,
+    providerId: vectorProviderId,
     usedVectorSearch: vector.length > 0,
     results,
   };
@@ -375,53 +391,32 @@ interface ReindexCandidate {
 
 function listReindexCandidates(
   db: Database.Database,
-  providerId: string,
   agentId: string,
-  force: boolean,
 ): ReindexCandidate[] {
-  const rows = db.prepare(
-    `SELECT m.id as memoryId,
-            m.content as content,
-            m.hash as contentHash,
-            e.status as embeddingStatus,
-            e.content_hash as embeddingHash
-     FROM memories m
-     LEFT JOIN embeddings e
-       ON e.memory_id = m.id
-      AND e.provider_id = ?
-     WHERE m.agent_id = ?
-       AND m.hash IS NOT NULL`,
-  ).all(providerId, agentId) as Array<{
-    memoryId: string;
-    content: string;
-    contentHash: string;
-    embeddingStatus?: string | null;
-    embeddingHash?: string | null;
-  }>;
-
-  return rows
-    .filter((row) => {
-      if (force) return true;
-      if (!row.embeddingStatus) return true;
-      if (row.embeddingStatus !== "ready") return true;
-      return row.embeddingHash !== row.contentHash;
-    })
-    .map((row) => ({
-      memoryId: row.memoryId,
-      content: row.content,
-      contentHash: row.contentHash,
-    }));
+  return db.prepare(
+    `SELECT id as memoryId,
+            content as content,
+            hash as contentHash
+     FROM memories
+     WHERE agent_id = ?
+       AND hash IS NOT NULL`,
+  ).all(agentId) as ReindexCandidate[];
 }
 
 export async function reindexEmbeddings(
   db: Database.Database,
   opts?: ReindexOptions,
 ): Promise<ReindexEmbeddingsResult> {
-  const provider = opts?.provider === undefined ? getEmbeddingProviderFromEnv() : opts.provider;
-  if (!provider) {
+  const providerManager = opts?.provider === undefined ? getEmbeddingProviderManager() : null;
+  const providers = opts?.provider
+    ? [opts.provider]
+    : providerManager?.listProviders() ?? [];
+
+  if (providers.length === 0) {
     return {
       enabled: false,
       providerId: null,
+      providerIds: [],
       scanned: 0,
       pending: 0,
       embedded: 0,
@@ -432,45 +427,57 @@ export async function reindexEmbeddings(
   const agentId = opts?.agent_id ?? "default";
   const force = opts?.force ?? false;
   const batchSize = Math.max(1, opts?.batchSize ?? 16);
-  const candidates = listReindexCandidates(db, provider.id, agentId, force);
-
-  for (const candidate of candidates) {
-    markMemoryEmbeddingPending(db, candidate.memoryId, provider.id, candidate.contentHash);
-  }
-
+  let scanned = 0;
+  let pending = 0;
   let embedded = 0;
   let failed = 0;
 
-  for (let index = 0; index < candidates.length; index += batchSize) {
-    const batch = candidates.slice(index, index + batchSize);
-    try {
-      const vectors = await provider.embed(batch.map((row) => row.content));
-      if (vectors.length !== batch.length) {
-        throw new Error(`Expected ${batch.length} embeddings, received ${vectors.length}`);
-      }
-      for (let offset = 0; offset < batch.length; offset++) {
-        upsertReadyEmbedding({
-          db,
-          memoryId: batch[offset].memoryId,
-          providerId: provider.id,
-          vector: vectors[offset],
-          contentHash: batch[offset].contentHash,
-        });
-        embedded += 1;
-      }
-    } catch {
-      for (const candidate of batch) {
-        markEmbeddingFailed(db, candidate.memoryId, provider.id, candidate.contentHash);
-        failed += 1;
+  for (const provider of providers) {
+    if (force) {
+      resetVectorSidecar(db, provider.id);
+    }
+
+    const candidates = listReindexCandidates(db, agentId);
+
+    scanned += candidates.length;
+    pending += candidates.length;
+
+    for (const candidate of candidates) {
+      markMemoryEmbeddingPending(db, candidate.memoryId, provider.id, candidate.contentHash);
+    }
+
+    for (let index = 0; index < candidates.length; index += batchSize) {
+      const batch = candidates.slice(index, index + batchSize);
+      try {
+        const vectors = await provider.embed(batch.map((row) => row.content));
+        if (vectors.length !== batch.length) {
+          throw new Error(`Expected ${batch.length} embeddings, received ${vectors.length}`);
+        }
+        for (let offset = 0; offset < batch.length; offset++) {
+          upsertReadyEmbedding({
+            db,
+            memoryId: batch[offset].memoryId,
+            providerId: provider.id,
+            vector: vectors[offset],
+            contentHash: batch[offset].contentHash,
+          });
+          embedded += 1;
+        }
+      } catch {
+        for (const candidate of batch) {
+          markEmbeddingFailed(db, candidate.memoryId, provider.id, candidate.contentHash);
+          failed += 1;
+        }
       }
     }
   }
 
   return {
     enabled: true,
-    providerId: provider.id,
-    scanned: candidates.length,
-    pending: candidates.length,
+    providerId: providers[0]?.id ?? null,
+    providerIds: providers.map((provider) => provider.id),
+    scanned,
+    pending,
     embedded,
     failed,
   };
