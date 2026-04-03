@@ -74,6 +74,14 @@ function parseLocalHttpResponse(json: unknown, dimension: number, context: strin
   return parseOpenAIResponse(json, dimension, context);
 }
 
+function parseOllamaResponse(json: unknown, dimension: number, context: string): number[][] {
+  const embeddings = (json as { embeddings?: unknown[] })?.embeddings;
+  if (!Array.isArray(embeddings)) {
+    throw new Error(`${context} returned an invalid embeddings payload`);
+  }
+  return embeddings.map((row, index) => assertEmbeddingVector(row, dimension, `${context} item ${index}`));
+}
+
 async function runEmbeddingRequest(input: {
   context: string;
   url: string;
@@ -221,6 +229,37 @@ export function createGeminiEmbeddingProvider(opts: GeminiEmbeddingProviderOptio
   };
 }
 
+export function createOllamaEmbeddingProvider(opts: EmbeddingProviderOptions): EmbeddingProvider {
+  const endpoint = opts.endpoint ? opts.endpoint : "/api/embed";
+  const url = resolveEndpoint(opts.baseUrl, endpoint);
+  
+  const providerDescriptor = `${trimTrailingSlashes(opts.baseUrl)}|${opts.model}|${opts.dimension}`;
+  const id = stableProviderId(`ollama:${opts.model}`, providerDescriptor);
+
+  return {
+    id,
+    model: opts.model,
+    dimension: opts.dimension,
+    async embed(texts: string[]): Promise<number[][]> {
+      if (texts.length === 0) return [];
+      return runEmbeddingRequest({
+        context: "ollama embedding provider",
+        url,
+        dimension: opts.dimension,
+        fetchImpl: opts.fetchImpl,
+        headers: opts.headers,
+        body: {
+          model: opts.model,
+          input: texts,
+        },
+        parser: parseOllamaResponse,
+      });
+    },
+    async healthcheck(): Promise<void> {
+      await this.embed(["healthcheck"]);
+    },
+  };
+}
 export function normalizeEmbeddingBaseUrl(baseUrl: string): string {
   return trimTrailingSlashes(baseUrl);
 }

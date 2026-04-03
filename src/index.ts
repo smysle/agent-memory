@@ -69,6 +69,7 @@ export {
 export {
   createOpenAICompatibleEmbeddingProvider,
   createLocalHttpEmbeddingProvider,
+  createOllamaEmbeddingProvider,
   type EmbeddingProvider,
   type EmbeddingProviderOptions,
 } from "./search/embedding.js";

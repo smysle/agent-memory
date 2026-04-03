@@ -2,11 +2,12 @@ import {
   createGeminiEmbeddingProvider,
   createLocalHttpEmbeddingProvider,
   createOpenAICompatibleEmbeddingProvider,
+  createOllamaEmbeddingProvider,
   normalizeEmbeddingBaseUrl,
   type EmbeddingProvider,
 } from "./embedding.js";
 
-export type EmbeddingProviderKind = "openai-compatible" | "local-http" | "gemini";
+export type EmbeddingProviderKind = "openai-compatible" | "local-http" | "gemini" | "ollama";
 export type EmbeddingProviderHealthState = "healthy" | "degraded";
 
 export interface EmbeddingProviderConfig {
@@ -67,7 +68,7 @@ function parseDimension(raw: string | undefined): number | undefined {
 
 function parseProvider(raw: string | undefined): EmbeddingProviderKind | null {
   if (!raw) return null;
-  if (raw === "openai-compatible" || raw === "local-http" || raw === "gemini") {
+  if (raw === "openai-compatible" || raw === "local-http" || raw === "gemini" || raw === "ollama") {
     return raw;
   }
   throw new Error(`Unsupported embedding provider: ${raw}`);
@@ -129,6 +130,15 @@ function createProviderFromConfig(
       model: input.model,
       dimension: input.dimension,
       apiKey: input.apiKey,
+      fetchImpl: opts?.fetchImpl,
+    });
+  }
+
+  if (input.provider === "ollama") {
+    return createOllamaEmbeddingProvider({
+      baseUrl: input.baseUrl,
+      model: input.model,
+      dimension: input.dimension,
       fetchImpl: opts?.fetchImpl,
     });
   }
