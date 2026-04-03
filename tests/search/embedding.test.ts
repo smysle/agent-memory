@@ -3,6 +3,7 @@ import {
   createGeminiEmbeddingProvider,
   createLocalHttpEmbeddingProvider,
   createOpenAICompatibleEmbeddingProvider,
+  createOllamaEmbeddingProvider,
 } from "../../src/search/embedding.js";
 import {
   clearRuntimeEmbeddingProviderConfigs,
@@ -71,6 +72,55 @@ describe("embedding providers", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  // --- OLLAMA TESTS START ---
+
+  it("calls native ollama embeddings endpoint with batch input", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      model: "nomic-embed-text",
+      embeddings: [
+        [0.7, 0.8],
+        [0.9, 0.1],
+      ],
+    }), { status: 200 }));
+
+    const provider = createOllamaEmbeddingProvider({
+      baseUrl: "http://127.0.0.1:11434",
+      model: "nomic-embed-text",
+      dimension: 2,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    await expect(provider.embed(["test one", "test two"]))
+      .resolves
+      .toEqual([[0.7, 0.8], [0.9, 0.1]]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    // Verifies it hits the specific native endpoint, not /v1/embeddings
+    expect(url).toBe("http://127.0.0.1:11434/api/embed"); 
+    expect(JSON.parse(String(init.body))).toEqual({
+      model: "nomic-embed-text",
+      input: ["test one", "test two"],
+    });
+  });
+
+it("creates ollama provider from env config", () => {
+    const provider = getEmbeddingProvider({
+      env: {
+        AGENT_MEMORY_EMBEDDING_PROVIDER: "ollama",
+        AGENT_MEMORY_EMBEDDING_BASE_URL: "http://127.0.0.1:11434", // Added the required URL
+        AGENT_MEMORY_EMBEDDING_MODEL: "mxbai-embed-large",
+        AGENT_MEMORY_EMBEDDING_DIMENSION: "1024",
+      } as unknown as NodeJS.ProcessEnv,
+    });
+
+    expect(provider).not.toBeNull();
+    expect(provider!.model).toBe("mxbai-embed-large");
+    expect(provider!.dimension).toBe(1024);
+    expect(provider!.id).toContain("ollama:");
+  });
+  // --- OLLAMA TESTS END ---
 
   it("returns null when embedding provider is not configured", () => {
     expect(getEmbeddingProviderFromEnv({})).toBeNull();
