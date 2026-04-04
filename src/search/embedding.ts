@@ -232,15 +232,16 @@ export function createGeminiEmbeddingProvider(opts: GeminiEmbeddingProviderOptio
 export function createOllamaEmbeddingProvider(opts: EmbeddingProviderOptions): EmbeddingProvider {
   // Explicitly assign the endpoint to override resolveEndpoint's default
   const endpoint = opts.endpoint ? opts.endpoint : "/api/embed";
-  
+
   // Guard against users passing the full endpoint in the baseUrl
   const normalizedBaseUrl = trimTrailingSlashes(opts.baseUrl);
   const normalizedEndpoint = trimTrailingSlashes(endpoint);
   const url = normalizedBaseUrl.endsWith(normalizedEndpoint)
     ? normalizedBaseUrl
     : resolveEndpoint(opts.baseUrl, endpoint);
+  const canonicalUrl = trimTrailingSlashes(url);
 
-  const providerDescriptor = `${normalizedBaseUrl}|${opts.model}|${opts.dimension}`;
+  const providerDescriptor = `${canonicalUrl}|${opts.model}|${opts.dimension}`;
   const id = stableProviderId(`ollama:${opts.model}`, providerDescriptor);
 
   return {
