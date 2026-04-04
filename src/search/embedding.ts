@@ -74,6 +74,14 @@ function parseLocalHttpResponse(json: unknown, dimension: number, context: strin
   return parseOpenAIResponse(json, dimension, context);
 }
 
+function parseOllamaResponse(json: unknown, dimension: number, context: string): number[][] {
+  const embeddings = (json as { embeddings?: unknown[] })?.embeddings;
+  if (!Array.isArray(embeddings)) {
+    throw new Error(`${context} returned an invalid embeddings payload`);
+  }
+  return embeddings.map((row, index) => assertEmbeddingVector(row, dimension, `${context} item ${index}`));
+}
+
 async function runEmbeddingRequest(input: {
   context: string;
   url: string;
@@ -214,6 +222,46 @@ export function createGeminiEmbeddingProvider(opts: GeminiEmbeddingProviderOptio
       return embeddings.map((entry, index) =>
         assertEmbeddingVector(entry?.values, opts.dimension, `Gemini embedding item ${index}`),
       );
+    },
+    async healthcheck(): Promise<void> {
+      await this.embed(["healthcheck"]);
+    },
+  };
+}
+
+export function createOllamaEmbeddingProvider(opts: EmbeddingProviderOptions): EmbeddingProvider {
+  // Explicitly assign the endpoint to override resolveEndpoint's default
+  const endpoint = opts.endpoint ? opts.endpoint : "/api/embed";
+
+  // Guard against users passing the full endpoint in the baseUrl
+  const normalizedBaseUrl = trimTrailingSlashes(opts.baseUrl);
+  const normalizedEndpoint = trimTrailingSlashes(endpoint);
+  const url = normalizedBaseUrl.endsWith(normalizedEndpoint)
+    ? normalizedBaseUrl
+    : resolveEndpoint(opts.baseUrl, endpoint);
+  const canonicalUrl = trimTrailingSlashes(url);
+
+  const providerDescriptor = `${canonicalUrl}|${opts.model}|${opts.dimension}`;
+  const id = stableProviderId(`ollama:${opts.model}`, providerDescriptor);
+
+  return {
+    id,
+    model: opts.model,
+    dimension: opts.dimension,
+    async embed(texts: string[]): Promise<number[][]> {
+      if (texts.length === 0) return [];
+      return runEmbeddingRequest({
+        context: "ollama embedding provider",
+        url,
+        dimension: opts.dimension,
+        fetchImpl: opts.fetchImpl,
+        headers: opts.headers,
+        body: {
+          model: opts.model,
+          input: texts,
+        },
+        parser: parseOllamaResponse,
+      });
     },
     async healthcheck(): Promise<void> {
       await this.embed(["healthcheck"]);
